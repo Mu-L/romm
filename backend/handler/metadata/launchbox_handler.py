@@ -361,7 +361,7 @@ LAUNCHBOX_PLATFORM_LIST: dict[str, SlugToLaunchboxPlatformName] = {
     "pokemon-mini": {"id": 195, "name": "Nintendo Pokemon Mini"},
     "satellaview": {"id": 168, "name": "Nintendo Satellaview"},
     "switch": {"id": 211, "name": "Nintendo Switch"},
-    "switch2": {"id": 224, "name": "Nintendo Switch 2"},
+    "switch-2": {"id": 224, "name": "Nintendo Switch 2"},
     "virtualboy": {"id": 32, "name": "Nintendo Virtual Boy"},
     "wii": {"id": 33, "name": "Nintendo Wii"},
     "wiiu": {"id": 34, "name": "Nintendo Wii U"},

@@ -831,6 +831,7 @@ IGDB_PLATFORM_LIST: list[SlugToIGDB] = [
     {"slug": "atari2600", "name": "Atari 2600"},
     {"slug": "psvr2", "name": "PlayStation VR2"},
     {"slug": "switch", "name": "Nintendo Switch"},
+    {"slug": "switch-2", "name": "Nintendo Switch 2"},
     {"slug": "evercade", "name": "Evercade"},
     {"slug": "android", "name": "Android"},
     {"slug": "mac", "name": "Mac"},

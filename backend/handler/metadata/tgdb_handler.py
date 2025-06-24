@@ -1348,7 +1348,7 @@ TGDB_PLATFORM_LIST: dict[str, SlugToTGDBId] = {
         "summary": "The Nintendo Switch (Japanese: ニンテンドースイッチ Hepburn: Nintendō Suitchi?), is Nintendo's seventh major home console. Originally known in development as the NX, it was officially unveiled in October 2016 and released worldwide on March 3, 2017.The Switch is a 'hybrid' console, allowing different modes of play. Its main unit is shaped like a tablet computer which can be used portably as-is, or connected to a television display through a detachable docking station. In addition it can also be used in a tapletop form with its kickstand. Despite these characteristics, Nintendo markets the Switch primarily as a home console rather than as a portable.Its most distinguishable feature are the 'Joy-Con' controllers. These are two detachable controllers that can be either attached to a 'Grip' to provide a traditional home console gamepad form, attached on either side of the main unit for handheld play, or can be used individually in the hand like Nintendo's Wii Remote. The Joy-Cons are similarly motion-sensitive, and feature NFC for reading Amiibo data. The Switch uses flash ROM cartridges for media, rather than optical discs.",
         "url_logo": "https://cdn.thegamesdb.net/images/original/platform/boxart/4971-1.jpg",
     },
-    "switch2": {
+    "switch-2": {
         "id": 5021,
         "name": "Nintendo Switch 2",
         "manufacturer": "Nintendo",

@@ -86,6 +86,7 @@ NON_HASHABLE_PLATFORMS = frozenset(
         "psvr2",
         "series-x-s",
         "switch",
+        "switch-2",
         "wiiu",
         "win",
         "xbox-360",
