@@ -181,7 +181,29 @@ function updateOptions({ sortBy }: { sortBy: SortBy }) {
         @click="updateSelectAll"
       />
     </template>
-    <template #item.data-table-select="{ item }">
+    <template v-slot:item="{ item }">
+      <a
+        href="https://google.es"
+        target="_blank"
+        style="text-decoration: none; color: inherit"
+      >
+        <tr
+          class="text-no-wrap d-flex align-center pointer bg-blue"
+          style="width: 100% !important"
+        >
+          <td>
+            <v-checkbox-btn
+              class="ml-2 mr-4"
+              :model-value="selectedRomIDs.includes(item.id)"
+              @click.stop
+              @click="updateSelectedRom(item)"
+            />
+          </td>
+          <td>{{ item.name }}</td>
+        </tr>
+      </a>
+    </template>
+    <!-- <template #item.data-table-select="{ item }">
       <v-checkbox-btn
         :model-value="selectedRomIDs.includes(item.id)"
         @click.stop
@@ -364,7 +386,7 @@ function updateOptions({ sortBy }: { sortBy: SortBy }) {
           <admin-menu :rom="item" />
         </v-menu>
       </v-btn-group>
-    </template>
+    </template> -->
   </v-data-table-server>
 </template>
 
