@@ -9,7 +9,7 @@ from handler.filesystem import fs_platform_handler, fs_resource_handler
 from models.platform import Platform
 from models.rom import Rom
 from models.user import User
-from utils.pegasus_exporter import PegasusExporter
+from utils.pegasus_exporter import PegasusExporter, parse_pegasus
 
 
 class ParsedPegasus(TypedDict):
@@ -729,3 +729,41 @@ x-note: discs
         assert set(games) == {"Super Mario World", "Multi Disc Game"}
         assert games["Multi Disc Game"]["file"] == "Multi Disc Game (USA)"
         assert games["Multi Disc Game"]["x-note"] == "discs"
+
+    @pytest.mark.parametrize(
+        "alias",
+        [
+            "sort_by",
+            "sortby",
+            "sort-title",
+            "sort_title",
+            "sorttitle",
+            "sort-name",
+            "sort_name",
+            "sortname",
+        ],
+    )
+    async def test_sort_aliases_are_replaced(
+        self, alias: str, snes_platform: Platform, metadata_file: Path
+    ):
+        """Every spelling Pegasus accepts for the sort title is replaced by
+        RomM's `sort-by`, since Pegasus would otherwise apply the stale one."""
+        rom = db_rom_handler.get_roms_scalar(platform_ids=[snes_platform.id])[0]
+        db_rom_handler.update_rom(rom.id, {"name": "Super Mario World: SNES"})
+        _write_metadata(
+            metadata_file,
+            f"collection: SNES\nshortname: snes\n\n"
+            f"game: Old\nfile: Super Mario World (USA).sfc\n{alias}: Zzz\n",
+        )
+
+        exporter = PegasusExporter(local_export=True)
+        assert (
+            await exporter.export_platform_to_file(snes_platform.id, request=None)
+            is True
+        )
+
+        content = _read_metadata(metadata_file)
+        assert "Zzz" not in content
+        mario = _parse_pegasus(content)["games"][0]
+        assert mario["sort-by"] == "Super Mario World"
+        assert parse_pegasus(content)[-1].keys() >= {"game", "file", "sort-by"}
