@@ -32,7 +32,7 @@ jobs:
         db: [mariadb, postgresql]
     services:
       mariadb:
-        image: mariadb:10.11
+        image: mariadb:11.3.2
         ports:
           - 3306
         env:
@@ -40,7 +40,7 @@ jobs:
           MYSQL_PASSWORD: passwd
           MYSQL_DATABASE: romm_test
           MYSQL_ROOT_PASSWORD: passwd
-        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-timeout=2s --health-retries=3
       postgresql:
         image: postgres:16
         ports:
