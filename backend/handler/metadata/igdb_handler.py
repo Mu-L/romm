@@ -118,8 +118,7 @@ class IGDBMetadataMultiplayerMode(TypedDict):
 
 class IGDBMetadata(TypedDict):
     total_rating: str | None
-    # Votes behind total_rating: a 10/10 from one source is not the same
-    # claim as 9/10 from a thousand.
+    # 9/10 from a thousand > 10/10 from one
     total_rating_count: int | None
     aggregated_rating: str | None
     first_release_date: int | None
