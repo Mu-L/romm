@@ -170,14 +170,19 @@ class PegasusBlock:
         return [line for key, lines in self.fields if key not in skip for line in lines]
 
     def file_names(self) -> set[str]:
+        """Each listed filename, plus its top folder (a multi-file ROM's fs_name)."""
         names: set[str] = set()
         for key, lines in self.fields:
             if key != "file":
                 continue
             _, _, value = lines[0].partition(":")
             for raw in [value, *lines[1:]]:
-                if raw.strip():
-                    names.add(Path(raw.strip().removeprefix("./")).name)
+                if not raw.strip():
+                    continue
+                path = Path(raw.strip().removeprefix("./"))
+                names.add(path.name)
+                if len(path.parts) > 1 and not path.is_absolute():
+                    names.add(path.parts[0])
         return names
 
 
@@ -505,7 +510,7 @@ class PegasusExporter:
             return ExistingPegasus()
 
         content = await fs_platform_handler.read_file(metadata_path)
-        return parse_existing_pegasus(content.decode("utf-8"))
+        return parse_existing_pegasus(content.decode("utf-8-sig"))
 
     async def export_platform_to_file(
         self,

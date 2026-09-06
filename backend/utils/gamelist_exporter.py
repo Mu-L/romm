@@ -7,6 +7,7 @@ from xml.etree.ElementTree import (  # trunk-ignore(bandit/B405)
     Element,
     ParseError,
     SubElement,
+    TreeBuilder,
     indent,
     tostring,
 )
@@ -76,7 +77,9 @@ def parse_existing_gamelist(content: str) -> ExistingGamelist:
         return existing
 
     body = XML_DECLARATION_RE.sub("", content, count=1)
-    wrapper = ET.fromstring(f"<romm>{body}</romm>")
+    parser = ET.XMLParser(target=TreeBuilder(insert_comments=True, insert_pis=True))
+    parser.feed(f"<romm>{body}</romm>")
+    wrapper = parser.close()
 
     gamelist = wrapper.find("gameList")
     for elem in wrapper:
@@ -88,8 +91,14 @@ def parse_existing_gamelist(content: str) -> ExistingGamelist:
 
     for elem in gamelist:
         path_elem = elem.find("path") if elem.tag == "game" else None
-        if path_elem is not None and path_elem.text:
-            existing.games[gamelist_path_to_filename(path_elem.text)] = elem
+        filename = (
+            gamelist_path_to_filename(path_elem.text)
+            if path_elem is not None and path_elem.text
+            else None
+        )
+        # A second entry with the same filename is carried over, not dropped.
+        if filename and filename not in existing.games:
+            existing.games[filename] = elem
         else:
             existing.others.append(elem)
 
@@ -413,7 +422,7 @@ class GamelistExporter:
             return ExistingGamelist()
 
         content = await fs_platform_handler.read_file(gamelist_path)
-        return parse_existing_gamelist(content.decode("utf-8"))
+        return parse_existing_gamelist(content.decode("utf-8-sig"))
 
     def export_platform_to_xml(self, platform_id: int, request: Request | None) -> str:
         """Export a platform's ROMs to gamelist.xml format (no asset files copied)."""

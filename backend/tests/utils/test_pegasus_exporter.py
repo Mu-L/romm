@@ -661,3 +661,71 @@ file: hack.sfc
             is False
         )
         assert _read_metadata_bytes(metadata_file) == b"\xff\xfe not utf-8"
+
+    async def test_reads_bom_prefixed_file(
+        self, snes_platform: Platform, metadata_file: Path
+    ):
+        """A UTF-8 BOM does not hide the collection header or the game keys."""
+        _write_metadata(
+            metadata_file,
+            "﻿collection: SNES\nshortname: snes\n\n"
+            "game: Old\nfile: Super Mario World (USA).sfc\nx-favorite: yes\n",
+        )
+
+        exporter = PegasusExporter(local_export=True)
+        assert (
+            await exporter.export_platform_to_file(snes_platform.id, request=None)
+            is True
+        )
+
+        content = _read_metadata(metadata_file)
+        assert content.count("collection:") == 1
+        assert content.startswith("collection: Super Nintendo Entertainment System\n")
+        assert content.count("game:") == 1
+        assert _parse_pegasus(content)["games"][0]["x-favorite"] == "yes"
+
+    async def test_matches_multi_file_rom_by_folder(
+        self, admin_user: User, snes_platform: Platform, metadata_file: Path
+    ):
+        """A block listing the discs of a game folder merges into RomM's entry
+        for that folder instead of being duplicated."""
+        rom = db_rom_handler.add_rom(
+            Rom(
+                platform_id=snes_platform.id,
+                name="Multi Disc Game",
+                slug="multi-disc-game",
+                fs_name="Multi Disc Game (USA)",
+                fs_name_no_tags="Multi Disc Game",
+                fs_name_no_ext="Multi Disc Game (USA)",
+                fs_extension="",
+                fs_path="snes/roms",
+                multi_file=True,
+            )
+        )
+        db_rom_handler.add_rom_user(rom_id=rom.id, user_id=admin_user.id)
+        _write_metadata(
+            metadata_file,
+            """collection: SNES
+shortname: snes
+
+game: Multi Disc
+files:
+  ./Multi Disc Game (USA)/disc1.chd
+  ./Multi Disc Game (USA)/disc2.chd
+x-note: discs
+""",
+        )
+
+        exporter = PegasusExporter(local_export=True)
+        assert (
+            await exporter.export_platform_to_file(snes_platform.id, request=None)
+            is True
+        )
+
+        content = _read_metadata(metadata_file)
+        assert "files:" not in content
+        assert "game: Multi Disc\n" not in content
+        games = {g["game"]: g for g in _parse_pegasus(content)["games"]}
+        assert set(games) == {"Super Mario World", "Multi Disc Game"}
+        assert games["Multi Disc Game"]["file"] == "Multi Disc Game (USA)"
+        assert games["Multi Disc Game"]["x-note"] == "discs"

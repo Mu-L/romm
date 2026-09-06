@@ -807,3 +807,114 @@ async def test_export_platform_to_file_refuses_to_overwrite_unparseable_gamelist
     exporter = GamelistExporter(local_export=True)
     assert await exporter.export_platform_to_file(platform.id, request=None) is False
     assert gamelist.read_text() == broken
+
+
+async def test_export_platform_to_file_reads_bom_prefixed_gamelist(
+    platform_with_roms, isolated_filesystem
+):
+    """A UTF-8 BOM, as Windows editors write it, does not block the merge."""
+    platform, _ = platform_with_roms
+    gamelist = isolated_filesystem.platform_dir(platform) / "gamelist.xml"
+    gamelist.parent.mkdir(parents=True, exist_ok=True)
+    gamelist.write_text(
+        """<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./Super Mario World (USA).sfc</path>
+    <favorite>true</favorite>
+  </game>
+</gameList>
+""",
+        encoding="utf-8-sig",
+    )
+
+    exporter = GamelistExporter(local_export=True)
+    assert await exporter.export_platform_to_file(platform.id, request=None) is True
+
+    games = fromstring(gamelist.read_text(encoding="utf-8")).findall("game")
+    assert [g.findtext("favorite") for g in games] == ["true"]
+
+
+async def test_export_platform_to_file_keeps_colliding_filenames(
+    platform_with_roms, isolated_filesystem
+):
+    """Two entries whose paths share a filename are both kept: the first is
+    merged with RomM's data, the second is carried over untouched."""
+    platform, _ = platform_with_roms
+    gamelist = _write_gamelist(
+        isolated_filesystem,
+        platform,
+        """<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./Super Mario World (USA).sfc</path>
+    <favorite>true</favorite>
+  </game>
+  <game>
+    <path>./Hacks/Super Mario World (USA).sfc</path>
+    <name>Kaizo</name>
+    <playcount>9</playcount>
+  </game>
+</gameList>
+""",
+    )
+
+    exporter = GamelistExporter(local_export=True)
+    assert await exporter.export_platform_to_file(platform.id, request=None) is True
+
+    by_path = {
+        g.findtext("path"): g for g in fromstring(gamelist.read_text()).findall("game")
+    }
+    assert set(by_path) == {
+        "./Super Mario World (USA).sfc",
+        "./Hacks/Super Mario World (USA).sfc",
+    }
+    assert by_path["./Super Mario World (USA).sfc"].findtext("favorite") == "true"
+    assert by_path["./Super Mario World (USA).sfc"].find("scrap") is not None
+    hack = by_path["./Hacks/Super Mario World (USA).sfc"]
+    assert hack.findtext("name") == "Kaizo"
+    assert hack.findtext("playcount") == "9"
+    assert hack.find("scrap") is None
+
+
+async def test_export_platform_to_file_keeps_comments_and_instructions(
+    platform_with_roms, isolated_filesystem
+):
+    """XML comments and processing instructions are written back wherever
+    they sat: beside <gameList>, inside it, and inside a <game>."""
+    platform, _ = platform_with_roms
+    gamelist = _write_gamelist(
+        isolated_filesystem,
+        platform,
+        """<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="gamelist.xsl"?>
+<!-- edited by hand -->
+<gameList>
+  <!-- section: platformers -->
+  <game>
+    <path>./Super Mario World (USA).sfc</path>
+    <!-- do not rescrape -->
+    <favorite>true</favorite>
+  </game>
+</gameList>
+""",
+    )
+
+    exporter = GamelistExporter(local_export=True)
+    assert await exporter.export_platform_to_file(platform.id, request=None) is True
+
+    content = gamelist.read_text()
+    for kept in (
+        '<?xml-stylesheet type="text/xsl" href="gamelist.xsl"?>',
+        "<!-- edited by hand -->",
+        "<!-- section: platformers -->",
+        "<!-- do not rescrape -->",
+    ):
+        assert content.count(kept) == 1, kept
+    assert content.index("<!-- edited by hand -->") < content.index("<gameList>")
+
+    parsed = [
+        (g.findtext("path"), g.findtext("favorite"))
+        for g in GamelistHandler()._iter_game_elements(gamelist)
+    ]
+    assert parsed == [("./Super Mario World (USA).sfc", "true")]
