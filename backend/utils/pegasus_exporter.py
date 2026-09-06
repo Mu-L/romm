@@ -152,7 +152,40 @@ PEGASUS_KEY_ALIASES: Final[dict[str, str]] = {
     "tags": "tag",
 }
 
+# Pegasus's own asset-name spellings, folded to the names RomM emits (lowercase
+# because keys are lowercased before lookup).
+PEGASUS_ASSET_ALIASES: Final[dict[str, str]] = {
+    "boxfront": "box_front",
+    "boxart2d": "box_front",
+    "boxback": "box_back",
+    "boxspine": "box_spine",
+    "boxside": "box_spine",
+    "box_side": "box_spine",
+    "boxfull": "box_full",
+    "box": "box_full",
+    "disc": "cartridge",
+    "cart": "cartridge",
+    "wheel": "logo",
+    "screenmarquee": "bezel",
+    "border": "bezel",
+    "cabinetleft": "cabinet_left",
+    "cabinetright": "cabinet_right",
+    "steam": "steamgrid",
+    "grid": "steamgrid",
+    "flyer": "poster",
+    "screenshots": "screenshot",
+    "videos": "video",
+}
+
 COLLECTION_HEADER_KEYS: Final = frozenset({"collection", "shortname"})
+
+
+def canonical_pegasus_key(key: str) -> str:
+    """Fold every spelling Pegasus accepts for a lowercased key into one name."""
+    prefix, dot, asset = key.partition(".")
+    if dot and prefix in ("asset", "assets"):
+        return f"assets.{PEGASUS_ASSET_ALIASES.get(asset, asset)}"
+    return PEGASUS_KEY_ALIASES.get(key, key)
 
 
 @dataclass
@@ -204,8 +237,7 @@ def parse_pegasus(content: str) -> list[PegasusBlock]:
             continue
 
         raw_key, separator, _ = line.partition(":")
-        key = raw_key.strip().lower()
-        key = PEGASUS_KEY_ALIASES.get(key, key) if separator else ""
+        key = canonical_pegasus_key(raw_key.strip().lower()) if separator else ""
         if key in ("collection", "game"):
             blocks.append(PegasusBlock(key))
         blocks[-1].fields.append((key, [line]))

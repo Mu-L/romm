@@ -9,7 +9,11 @@ from handler.filesystem import fs_platform_handler, fs_resource_handler
 from models.platform import Platform
 from models.rom import Rom
 from models.user import User
-from utils.pegasus_exporter import PegasusExporter, parse_pegasus
+from utils.pegasus_exporter import (
+    PegasusExporter,
+    canonical_pegasus_key,
+    parse_pegasus,
+)
 
 
 class ParsedPegasus(TypedDict):
@@ -767,3 +771,62 @@ x-note: discs
         mario = _parse_pegasus(content)["games"][0]
         assert mario["sort-by"] == "Super Mario World"
         assert parse_pegasus(content)[-1].keys() >= {"game", "file", "sort-by"}
+
+    async def test_asset_aliases_are_replaced(
+        self, tmp_path, monkeypatch, snes_platform: Platform, metadata_file: Path
+    ):
+        """`asset.` and `assets.` prefixes and Pegasus's asset-name spellings
+        all count as the same key, so RomM's cover replaces the old one while
+        assets RomM does not emit are kept verbatim."""
+        monkeypatch.setattr(fs_resource_handler, "base_path", tmp_path)
+        cover = tmp_path / "roms/snes/1/cover/big.png"
+        cover.parent.mkdir(parents=True)
+        cover.write_bytes(b"x")
+        rom = db_rom_handler.get_roms_scalar(platform_ids=[snes_platform.id])[0]
+        db_rom_handler.update_rom(rom.id, {"path_cover_l": "roms/snes/1/cover/big.png"})
+        _write_metadata(
+            metadata_file,
+            """collection: SNES
+shortname: snes
+
+game: Old
+file: Super Mario World (USA).sfc
+asset.boxFront: old-cover.png
+assets.videos: old-video.mp4
+asset.wheel: keep-logo.png
+""",
+        )
+
+        exporter = PegasusExporter(local_export=True)
+        assert (
+            await exporter.export_platform_to_file(snes_platform.id, request=None)
+            is True
+        )
+
+        content = _read_metadata(metadata_file)
+        assert "old-cover.png" not in content
+        assert "assets.box_front: assets/covers/Super Mario World (USA).png" in content
+        assert "assets.videos: old-video.mp4" in content
+        assert "asset.wheel: keep-logo.png" in content
+        assert content.count("box_front") == 1
+
+
+@pytest.mark.parametrize(
+    "key, expected",
+    [
+        ("asset.boxfront", "assets.box_front"),
+        ("assets.boxart2d", "assets.box_front"),
+        ("asset.box_front", "assets.box_front"),
+        ("assets.screenshots", "assets.screenshot"),
+        ("asset.videos", "assets.video"),
+        ("asset.wheel", "assets.logo"),
+        ("assets.border", "assets.bezel"),
+        ("assets.titlescreen", "assets.titlescreen"),
+        ("assets.custom", "assets.custom"),
+        ("sortname", "sort-by"),
+        ("files", "file"),
+        ("x-favorite", "x-favorite"),
+    ],
+)
+def test_canonical_pegasus_key(key: str, expected: str):
+    assert canonical_pegasus_key(key) == expected
