@@ -67,8 +67,8 @@ const props = defineProps<{
   webp?: boolean;
 }>();
 
-// The same preference hides the "Recommended for you" row on Home, so the
-// feature can be switched off wherever it appears rather than per surface.
+// The same preference hides the "Recommended for you" row on Home: the
+// feature is switched off everywhere at once, not per surface.
 const { showRecommendations } = useUISettings();
 
 const visibleSimilarRoms = computed(() =>

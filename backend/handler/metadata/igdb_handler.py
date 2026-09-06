@@ -118,9 +118,8 @@ class IGDBMetadataMultiplayerMode(TypedDict):
 
 class IGDBMetadata(TypedDict):
     total_rating: str | None
-    # How many votes back total_rating. A 10/10 from one source is not the
-    # same claim as 9/10 from a thousand, and the cold-start feed needs to
-    # tell them apart.
+    # Votes behind total_rating: a 10/10 from one source is not the same
+    # claim as 9/10 from a thousand.
     total_rating_count: int | None
     aggregated_rating: str | None
     first_release_date: int | None
@@ -174,9 +173,8 @@ def build_related_game(
 def _expanded_names(entries: Sequence[Any]) -> list[str]:
     """Names from an IGDB expandable field.
 
-    A field that was requested without `.name` comes back as a bare id rather
-    than an object, so entries that are not dicts are skipped instead of
-    raising.
+    A field requested without `.name` comes back as a bare id, so non-dict
+    entries are skipped rather than raising.
     """
     return [
         name

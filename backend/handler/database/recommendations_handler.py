@@ -26,16 +26,13 @@ EDGE_INSERT_CHUNK_SIZE = 1_000
 # relate its entire contents to itself.
 MAX_CO_OCCURRENCE_SET_SIZE = 250
 
-# Two ROMs sharing any of these are one title and must never be recommended
-# for each other. Read off the same list `sibling_roms` matches on, so the two
-# agree on what "the same game" means; unlike that view this is not scoped to a
-# platform, since a game reissued on other hardware is no more a suggestion
-# than a second copy on the same one.
+# Two ROMs sharing any of these are one title and are never recommended for
+# each other. Read off the list `sibling_roms` matches on, but not scoped to a
+# platform: a game reissued on other hardware is no more a suggestion either.
 IDENTITY_ID_COLUMNS = tuple(getattr(RomFacets, field) for field in IDENTITY_ID_FIELDS)
 
-# Votes a rating needs before it is trusted on its own in the cold-start feed.
-# Below this it is blended with the library mean; well above it, the raw rating
-# carries. Tuned so a handful of votes cannot float an obscure game to the top.
+# Votes a rating needs before it is trusted on its own in the cold-start feed;
+# below this it is blended with the library mean.
 BAYESIAN_PRIOR_VOTES = 50
 
 
@@ -86,9 +83,8 @@ class DBRecommendationsHandler(DBBaseHandler):
     ) -> list[RomFeatureRow]:
         """Every ROM's facet values, for building the library-wide IDF.
 
-        Reads `roms_facets` rather than `roms` on purpose: the facet values are
-        mirrored there precisely so aggregations never touch the wide rows with
-        their provider-metadata blobs.
+        Reads `roms_facets` rather than `roms`: the values are mirrored there
+        so aggregations never touch the wide provider-metadata blobs.
         """
         stmt = (
             select(
@@ -128,12 +124,11 @@ class DBRecommendationsHandler(DBBaseHandler):
     def get_rom_identity_ids(
         self, session: Session = None  # type: ignore
     ) -> dict[int, frozenset[str]]:
-        """ROM id -> "provider:id" tokens from every identity provider that matched it.
+        """ROM id -> "provider:id" tokens from every provider that matched it.
 
-        Keyed by ROM id: the relationship is many-to-one (region and revision
-        variants share an id), and keying the other way would silently drop
-        every duplicate but one, which is exactly the set the suppression
-        needs to see. ROMs no identity provider matched are absent.
+        Keyed by ROM id because the relationship is many-to-one: keying the
+        other way drops every duplicate but one, which is the set duplicate
+        suppression needs to see. Unmatched ROMs are absent.
         """
         stmt = select(RomFacets.rom_id, *IDENTITY_ID_COLUMNS)
         identities: dict[int, frozenset[str]] = {}
@@ -169,11 +164,8 @@ class DBRecommendationsHandler(DBBaseHandler):
                 continue
 
             related_ids: list[int] = []
-            # `ports` is deliberately absent. A port is the same product on
-            # other hardware, so the relation says nothing about whether one
-            # is worth suggesting to someone who played the other. Where the
-            # port is faithful it is a duplicate, and where it was rebuilt for
-            # the target hardware it can earn a place on its own facets.
+            # `ports` is deliberately absent: a faithful port is a duplicate,
+            # and a rebuilt one earns its place on its own facets.
             for bucket in (
                 "similar_games",
                 "remakes",
@@ -408,11 +400,9 @@ class DBRecommendationsHandler(DBBaseHandler):
     ) -> list[int]:
         """Cold-start feed: the best-reviewed games in the library.
 
-        Ranked by a Bayesian average rather than the raw rating. A rating
-        backed by few votes is pulled toward the library mean in proportion to
-        how little evidence supports it, so a lone provider's perfect score no
-        longer outranks a broadly-liked classic. Without this the feed was
-        fourteen games that one source rated 100, listed alphabetically.
+        Ranked by a Bayesian average, so a rating backed by few votes is
+        pulled toward the library mean and a lone provider's perfect score
+        does not outrank a broadly-liked classic.
         """
         mean_rating = session.scalar(
             select(func.avg(RomMetadata.average_rating)).where(

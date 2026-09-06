@@ -236,7 +236,7 @@ class FeedBuilder:
             : limit * OVERFETCH_FACTOR
         ]
 
-        roms = _hydrate([candidate.rom_id for candidate in ordered])
+        roms = hydrate_roms([candidate.rom_id for candidate in ordered])
         seed_names = db_recommendation_handler.get_rom_names(
             [
                 candidate.best_seed_id
@@ -245,8 +245,6 @@ class FeedBuilder:
             ]
         )
 
-        # Shared with the "Similar games" surface so a series is counted by
-        # every name it goes under, not by one representative.
         chosen = cap_by_series(
             ordered,
             lambda candidate: roms.get(candidate.rom_id),
@@ -272,7 +270,7 @@ class FeedBuilder:
         rom_ids = db_recommendation_handler.get_fallback_rom_ids(
             limit, exclude_rom_ids=list(excluded)
         )
-        roms = _hydrate(rom_ids)
+        roms = hydrate_roms(rom_ids)
 
         return [
             RecommendedRom(
@@ -285,11 +283,11 @@ class FeedBuilder:
         ]
 
 
-def _hydrate(rom_ids: Sequence[int]) -> dict[int, Rom]:
+def hydrate_roms(rom_ids: Sequence[int]) -> dict[int, Rom]:
     """Load ROMs through the shared `SimpleRomSchema` load path.
 
-    Missing-from-disk ROMs are dropped here rather than filtered in SQL, so
-    the edge queries never have to join the wide `roms` table.
+    Missing-from-disk ROMs are dropped here rather than in SQL, so the edge
+    queries never have to join the wide `roms` table.
     """
     return {
         rom.id: rom
@@ -309,7 +307,7 @@ def get_cached_feed(user_id: int, limit: int) -> list[RecommendedRom] | None:
     except (ValueError, TypeError):
         return None
 
-    roms = _hydrate([entry["rom_id"] for entry in entries])
+    roms = hydrate_roms([entry["rom_id"] for entry in entries])
 
     return [
         RecommendedRom(

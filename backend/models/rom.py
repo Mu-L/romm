@@ -165,9 +165,8 @@ class DocSource(enum.StrEnum):
 
 
 # Provider ids that name a game rather than a file, so two ROMs sharing any of
-# them are one title (regions, revisions, storefront copies). This is what the
-# `sibling_roms` view below matches on, plus `steam_id`, which postdates it.
-# Add a provider here and to the view together, or the two notions of "same
+# them are one title (regions, revisions, storefront copies). Add a provider
+# here and to the `sibling_roms` view together, or the two notions of "the same
 # game" drift apart.
 IDENTITY_ID_FIELDS: Final[tuple[str, ...]] = (
     "igdb_id",
@@ -184,9 +183,8 @@ IDENTITY_ID_FIELDS: Final[tuple[str, ...]] = (
 class SiblingRom(BaseModel):
     """Other files of the same game on the same platform.
 
-    A database view, not a table: the match runs over `IDENTITY_ID_FIELDS`.
-    Platform-scoped, unlike the recommendation engine's duplicate suppression,
-    which has to catch the same game released on different hardware too.
+    A database view, not a table, matching over `IDENTITY_ID_FIELDS` minus
+    `steam_id`, which postdates it.
     """
 
     __tablename__ = "sibling_roms"
@@ -450,7 +448,7 @@ class RomMetadata(BaseModel):
     game_modes: Mapped[list[str] | None] = mapped_column(CustomJSON(), default=[])
     age_ratings: Mapped[list[str] | None] = mapped_column(CustomJSON(), default=[])
     # IGDB-only descriptors: community tags plus the curated theme and
-    # viewpoint lists. Far more specific about how a game plays than genre.
+    # viewpoint lists, more specific about how a game plays than genre.
     keywords: Mapped[list[str] | None] = mapped_column(CustomJSON(), default=[])
     themes: Mapped[list[str] | None] = mapped_column(CustomJSON(), default=[])
     player_perspectives: Mapped[list[str] | None] = mapped_column(
@@ -459,8 +457,7 @@ class RomMetadata(BaseModel):
     player_count: Mapped[str | None] = mapped_column(String(length=100), default="1")
     first_release_date: Mapped[int | None] = mapped_column(BigInteger(), default=None)
     average_rating: Mapped[float | None] = mapped_column(default=None)
-    # Votes behind `average_rating`, from IGDB. Zero where no provider
-    # reported one, which is how an unbacked perfect score is spotted.
+    # Votes behind `average_rating`; zero where no provider reported one.
     rating_count: Mapped[int | None] = mapped_column(BigInteger(), default=0)
 
     rom: Mapped[Rom] = relationship(lazy="joined", back_populates="metadatum")

@@ -241,15 +241,13 @@ const achievementsEarned = computed(() => earnedAchievementIds.value.size);
 
 const igdb = computed(() => currentRom.value?.igdb_metadata ?? null);
 
-// Similar games come from the server-side recommendations index, not from
-// `igdb_metadata.similar_games`: the IGDB list is mostly titles the server
-// doesn't hold, and it's missing entirely for anything IGDB never matched.
-// Every entry here is a real ROM in this library.
+// Similar games come from the server-side recommendations index rather than
+// `igdb_metadata.similar_games`, which is mostly titles the server doesn't
+// hold and absent entirely for anything IGDB never matched.
 const similarRoms = ref<SimilarRomSchema[]>([]);
 
 // Keyed on the id alone: `currentRom` is reassigned wholesale by every
-// optimistic mutation (favourite, rating, status), and refetching on those
-// would blank and repopulate the grid mid-interaction.
+// optimistic mutation, which would blank the grid mid-interaction.
 watch(
   () => currentRom.value?.id,
   (romId, _previous, onCleanup) => {
@@ -265,9 +263,8 @@ watch(
         similarRoms.value = data;
       })
       .catch(() => {
-        // The section simply stays hidden: an empty recommendations index
-        // (never built, or a library too small to relate anything) is a
-        // normal state, not an error worth interrupting the page for.
+        // An unbuilt index, or a library too small to relate anything, is a
+        // normal state rather than an error: the section stays hidden.
       });
   },
   { immediate: true },

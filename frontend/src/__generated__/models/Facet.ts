@@ -5,8 +5,7 @@
 /**
  * Every axis a recommendation can be explained by.
  *
- * Reaches the API as the `facet` of a similarity reason, so the generated
- * frontend types are a closed union and a new member cannot be added here
- * without the UI failing to compile until it maps one.
+ * Reaches the API as a similarity reason's `facet`, so a new member fails
+ * the frontend typecheck until the UI maps it.
  */
 export type Facet = 'collection' | 'franchise' | 'genre' | 'perspective' | 'theme' | 'keyword' | 'developer' | 'publisher' | 'company' | 'game_mode' | 'platform' | 'decade' | 'igdb' | 'top_rated';

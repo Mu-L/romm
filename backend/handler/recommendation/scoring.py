@@ -1,11 +1,8 @@
 """Pure scoring primitives for the recommendation engine.
 
-Deliberately free of ORM and I/O so the ranking maths can be exercised
-directly in tests. Everything here operates on plain dataclasses and dicts.
-
+Free of ORM and I/O so the ranking maths can be exercised directly in tests.
 The engine is library-relative: a facet is only as informative as it is rare
-*in this library*. A shelf of 4000 arcade games learns that "Action" says
-nothing and that "Metroidvania" says a great deal, without anyone tuning it.
+*in this library*, so no shelf needs its weights tuned by hand.
 """
 
 from __future__ import annotations
@@ -21,9 +18,8 @@ from typing import Final
 class Facet(enum.StrEnum):
     """Every axis a recommendation can be explained by.
 
-    Reaches the API as the `facet` of a similarity reason, so the generated
-    frontend types are a closed union and a new member cannot be added here
-    without the UI failing to compile until it maps one.
+    Reaches the API as a similarity reason's `facet`, so a new member fails
+    the frontend typecheck until the UI maps it.
     """
 
     COLLECTION = "collection"
@@ -52,34 +48,22 @@ FACET_WEIGHTS: Final[Mapping[str, float]] = {
     Facet.COLLECTION: 3.0,
     Facet.FRANCHISE: 2.5,
     Facet.GENRE: 1.0,
-    # IGDB's curated viewpoint list. "Side view" versus "First person" says
+    # IGDB's curated viewpoint list: "Side view" versus "First person" says
     # more about how a game plays than most genre labels do.
     Facet.PERSPECTIVE: 1.0,
-    # A secondary genre axis (Horror, Comedy, Fantasy), curated and low
-    # cardinality, so it earns close to a genre's weight.
+    # A curated, low-cardinality second genre axis (Horror, Comedy, Fantasy).
     Facet.THEME: 0.9,
-    # Community tags. High cardinality and mixed quality ("motorcycle" sits
-    # beside "metroidvania"), so IDF does most of the work and the weight
-    # stays below the curated facets. This is the least settled of the
-    # weights: on a 12.7k library 0.8 surfaced real golf games for Golf while
-    # 0.5 kept 2D Mario platformers ahead of Mario Tennis. Revisit with the
-    # inspection tool against a real shelf before trusting it.
+    # Community tags, high cardinality and mixed quality ("motorcycle" sits
+    # beside "metroidvania"), so IDF does most of the work here.
     Facet.KEYWORD: 0.7,
-    # Who actually made it. Set to what the merged `company` facet carried
-    # before the split, so separating the roles redistributes that weight
-    # rather than adding new influence.
-    #
-    # Sweeping it from 1.0 down to 0.4 barely moved results: tight studios
-    # (Treasure, Sacnoth) hold their matches at every value because their
-    # games also share genre and theme, and wide-ranging ones (Neversoft)
-    # only improve at the very bottom of the range.
+    # Who actually made it. Results barely move across 0.4-1.0, since tight
+    # studios share genre and theme with themselves anyway.
     Facet.DEVELOPER: 0.7,
     # Who shipped it. A label spans everything it ever released, and regional
-    # distributors land here too -- Tec Toy alone covers 774 games on a 15k
-    # library, dense enough that IDF does not suppress it on its own.
+    # distributors land here too, dense enough that IDF alone leaves them
+    # saying more than they mean.
     Facet.PUBLISHER: 0.25,
-    # Used only where no provider reported roles, so the role is unknown and
-    # the value could be either. Below genre for the same reason publisher is.
+    # Used only where no provider reported roles, so the value could be either.
     Facet.COMPANY: 0.7,
     # Nearly every game is "Single player", so this mostly rides along; IDF
     # already flattens it and the low weight keeps it from breaking ties.
@@ -88,19 +72,15 @@ FACET_WEIGHTS: Final[Mapping[str, float]] = {
     Facet.DECADE: 0.3,
 }
 
-# Facets present on more than this share of the library describe the library,
-# not the game. They still contribute to the score (with a tiny IDF) but are
-# skipped when generating candidates, so "Action" never expands into a
-# postings list covering most of the shelf.
+# Facets on more than this share of the library describe the library, not the
+# game. They still score (with a tiny IDF) but are skipped when generating
+# candidates, so "Action" never expands into most of the shelf.
 MAX_CANDIDATE_DF_RATIO: Final = 0.20
 MAX_CANDIDATE_POSTINGS: Final = 2_000
-# Soft ceiling on candidates gathered per ROM, reached only by games whose
-# every facet is rare. The last posting list is taken whole, so the set can
-# overshoot by up to one bucket.
+# Soft ceiling per ROM: the last posting list is taken whole, so the candidate
+# set can overshoot by up to one bucket.
 MAX_CANDIDATES_PER_ROM: Final = 1_500
-# ...but the ratio only makes sense once there is a library to take a ratio of.
-# Below this, expanding every token is cheap, and skipping them would leave a
-# small shelf with no candidates at all.
+# Floor under the ratio above, so a small shelf is not left with no candidates.
 MIN_CANDIDATE_DF: Final = 50
 
 # Blend of the four independent signals. These sum to 1.0 so a raw score is
@@ -115,25 +95,13 @@ CO_COLLECTION_WEIGHT: Final = 0.10
 MAX_QUALITY_BONUS: Final = 0.05
 
 # Length-normalisation strength: 1.0 is plain L2, 0.0 scales every vector by
-# the library average instead of its own length.
-#
-# Zero, against the 0.75 that text retrieval uses, because facet counts are not
-# verbosity. A long document repeating a word is not more relevant, which is
-# why retrieval normalises it away; but a game tagged with three genres and two
-# franchises genuinely has more in common than one carrying a single tag, and
+# the library average instead of its own length. Zero because facet counts are
+# not verbosity: a richly tagged game really does have more in common, and
 # dividing by its own length punished it for being well documented.
-#
-# Measured on a 12.7k-game library: at 0.75 every top match for a Mario
-# compilation was a 6-8 token entry (Golf, F-1 Race, Pinball); at 0.0 they were
-# 12-16 token entries (Yoshi's Island, Super Mario 64, Super Mario Kart). The
-# feared popularity bias did not appear -- across 300 sampled games the most
-# repeated recommendation fell from 6 lists to 3, and distinct results rose
-# from 1363 to 1384.
 PIVOT_B: Final = 0.0
 
-# Facets that place a game on the shelf rather than describe it. A ROM
-# carrying only these has nothing to be similar *about*: two unmatched files in
-# one folder would otherwise normalise to identical vectors.
+# Facets that place a game on the shelf rather than describe it: two unmatched
+# files in one folder would otherwise normalise to identical vectors.
 CONTEXT_FACETS: Final[frozenset[str]] = frozenset({Facet.PLATFORM, Facet.DECADE})
 TASTE_FACETS: Final[frozenset[str]] = frozenset(FACET_WEIGHTS) - CONTEXT_FACETS
 
@@ -243,13 +211,9 @@ def compute_idf(
 ) -> dict[str, float]:
     """Inverse document frequency over the library's token vocabulary.
 
-    Uses the BM25 form, ``ln(1 + (N - df + 0.5) / (df + 0.5))``. The simpler
-    ``ln(1 + N / (1 + df))`` was tried first and discriminates far too weakly:
-    a token on every ROM still scored ~0.69 against ~1.9 for a rare one, so
-    "Single player" (present on nearly every game) kept enough weight to pull
-    unrelated titles above genuine genre matches. BM25 drives the universal
-    token to ~0.02 while leaving the rare one untouched, and stays positive on
-    tiny libraries where a plain ``ln(N / df)`` collapses every token to zero.
+    BM25's form, ``ln(1 + (N - df + 0.5) / (df + 0.5))``: it drives a token
+    carried by every ROM to ~0.02 while leaving rare ones untouched, and stays
+    positive on libraries too small for ``ln(N / df)`` to discriminate at all.
     """
     if total_documents <= 0:
         return {}
@@ -267,15 +231,10 @@ def compute_idf(
 def build_vector(tokens: Sequence[str], idf: Mapping[str, float]) -> dict[str, float]:
     """Raw facet-weighted IDF vector, before any length normalisation.
 
-    A facet's weight is split across however many values it holds, so one
-    franchise counts for more than one of six. Without it, a compilation
-    carrying several franchises matches strongly on all of them: the SNES
-    Mario compilation pulled in Mario Tennis and Mario Party ahead of the 2D
-    platformers it actually resembles.
-
-    Splitting by sqrt rather than the count itself keeps a multi-value facet
-    worth more in total than a single-value one -- three genres really is more
-    information than one -- while stopping it from scaling linearly.
+    A facet's weight is split across its values, so one franchise counts for
+    more than one of six and a compilation does not match strongly on all six.
+    Splitting by sqrt of the count keeps three genres worth more in total than
+    one without letting them scale linearly.
     """
     facet_counts = Counter(token_facet(token) for token in tokens)
 
@@ -295,13 +254,7 @@ def vector_norm(vector: Mapping[str, float]) -> float:
 
 
 def pivot_length(norm: float, average_norm: float, *, b: float = PIVOT_B) -> float:
-    """Blend a vector's own length with the library average.
-
-    Plain L2 normalisation (b=1) divides by the vector's own length, which
-    hands sparsely-tagged games an advantage: with only a few tokens each one
-    carries enormous weight, so a game sharing one broad facet outscores a
-    richly-tagged game sharing three. See PIVOT_B for why the default is 0.
-    """
+    """Blend a vector's own length with the library average; see PIVOT_B."""
     if average_norm <= 0:
         return norm or 1.0
     return (1.0 - b) * average_norm + b * norm
@@ -318,8 +271,7 @@ def build_normalised_vectors(
 ) -> dict[int, dict[str, float]]:
     """Vectors for a whole library, pivot-normalised against its average length.
 
-    Needs the full set up front because the pivot is relative to the library,
-    the same way the IDF weighting is.
+    Needs the full set up front: the pivot is library-relative, as the IDF is.
     """
     raw = {key: build_vector(tokens, idf) for key, tokens in token_sets.items()}
     norms = {key: vector_norm(vector) for key, vector in raw.items()}
@@ -359,12 +311,9 @@ def shared_reasons(
         for token, weight in left.items()
         if token in right
     ]
-    # Keywords are ranked last regardless of contribution. They are the rarest
-    # tokens, so they carry the highest IDF and would otherwise always win the
-    # slot -- explaining a match with "drawbridge" or "frankenstein's monster"
-    # when the two games are really both Castlevanias. They still earn a slot
-    # once the curated facets are exhausted, where "interconnected-world" says
-    # something no genre can.
+    # Keywords rank last whatever they contribute: they carry the highest IDF,
+    # so they would otherwise explain two Castlevanias with "drawbridge". They
+    # still earn a slot once the curated facets run out.
     contributions.sort(
         key=lambda pair: (token_facet(pair[1]) == Facet.KEYWORD, -pair[0], pair[1])
     )
@@ -418,10 +367,10 @@ def _clamp(value: float) -> float:
 def build_inverted_index(
     features: Mapping[int, RomFeatures],
 ) -> dict[str, list[int]]:
-    """Token -> ROM ids, used to avoid the O(n^2) all-pairs comparison.
+    """Token -> ROM ids, the postings lists candidate generation reads.
 
-    Only ROMs sharing at least one *discriminative* token are ever scored
-    against each other, which is what keeps a 50k-ROM library tractable.
+    Only ROMs sharing a discriminative token are ever scored against each
+    other, which is what keeps a large library tractable.
     """
     postings: dict[str, list[int]] = defaultdict(list)
     for rom_id, feature in features.items():

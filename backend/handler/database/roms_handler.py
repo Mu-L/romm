@@ -484,8 +484,7 @@ def with_simple_details(func):
 
 # The fields the recommendation feed scores on. Every writer of `rom_user`
 # goes through `update_rom_user`, so the cached feed is dropped there rather
-# than at each call site: play sessions, save and state uploads and the
-# RetroAchievements sync all move these without touching the ROM endpoints.
+# than at each of the call sites that move these.
 RECOMMENDATION_SEED_FIELDS = frozenset(
     {"rating", "status", "last_played", "now_playing", "hidden"}
 )

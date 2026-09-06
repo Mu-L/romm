@@ -1414,10 +1414,8 @@ def get_similar_roms(
 ) -> list[SimilarRomSchema]:
     """Games in this library that resemble the given one.
 
-    Reads the precomputed similarity graph, which blends library-relative
-    metadata overlap with IGDB's related games, collection co-membership and
-    co-play. Unlike the raw IGDB list, every result is a game the server
-    actually holds.
+    Read from the precomputed similarity graph, so unlike IGDB's own related
+    games every result is a title the server actually holds.
     """
 
     rom = db_rom_handler.get_rom_simple(id)

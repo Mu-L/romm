@@ -9,8 +9,8 @@ from handler.recommendation.scoring import Facet
 class SimilarityReasonSchema(BaseModel):
     """Why two games were linked, e.g. {"facet": "franchise", "value": "Metroid"}.
 
-    `value` is empty for the facets that carry no value of their own, which the
-    frontend renders as a translated phrase instead.
+    `value` is empty for facets with no value of their own, which the frontend
+    renders as a translated phrase instead.
     """
 
     facet: Facet

@@ -1,11 +1,7 @@
 <script setup lang="ts">
-// SimilarGamesGrid — the "Similar games" section of the overview tab.
-//
-// Unlike RelatedGamesGrid, which renders IGDB's related-game stubs and
-// cross-references each one against the library on mount, every entry here
-// is already a real ROM resolved server-side by the recommendations index.
-// That means normal interactive GameCards (no synthetic rom, no per-card
-// request) and a reason chip explaining why each game was suggested.
+// The "Similar games" section of the overview tab. Every entry is a real ROM
+// resolved server-side, so unlike RelatedGamesGrid these are ordinary
+// interactive GameCards with no per-card library lookup.
 import type { SimilarRomSchema } from "@/__generated__";
 import GameCard from "@/v2/components/GameCard/GameCard.vue";
 import RecommendationReason from "@/v2/components/shared/RecommendationReason.vue";
@@ -32,11 +28,9 @@ defineProps<{
 </template>
 
 <style scoped>
-/* Flex-wrap rather than an auto-fill grid: GameCard is a fixed 158px wide
-   and never shrinks, so a `1fr` track would compute below that on narrow
-   viewports and push the cards into a horizontal overflow. Horizontal
-   padding leaves room for the cover hover-scale before the surrounding
-   scroll container clips it. */
+/* Flex-wrap rather than an auto-fill grid: GameCard has a fixed width and
+   never shrinks, so a `1fr` track overflows on narrow viewports. The padding
+   leaves room for the cover hover-scale before the scroll container clips it. */
 .similar-games {
   display: flex;
   flex-wrap: wrap;

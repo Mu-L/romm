@@ -32,8 +32,8 @@ def get_recommendations(
 ) -> list[RecommendedRomSchema]:
     """Personalised game recommendations for the current user.
 
-    Ranked on demand from the precomputed similarity graph plus the user's
-    live play history, so a game played minutes ago already steers the feed.
+    Ranked on demand from the similarity graph plus live play history, so a
+    game played minutes ago already steers the feed.
     """
     feed = recommended_roms(
         request.user.id,

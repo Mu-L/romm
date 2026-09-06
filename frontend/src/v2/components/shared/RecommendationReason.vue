@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // The caption under a recommended game card, shared by the Home row and the
-// game-details "Similar games" section so both explain a suggestion the same
-// way. Renders nothing when there is nothing to explain.
+// game-details "Similar games" section. Renders nothing with no reason.
 import { RIcon } from "@v2/lib";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";

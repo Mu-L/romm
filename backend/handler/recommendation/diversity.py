@@ -1,12 +1,8 @@
 """Keeps a recommendation list from collapsing into one series.
 
 Similarity ranking alone puts every Metroid game above every Metroidvania,
-which makes "Similar games" a duplicate of a franchise filter. Someone who
-owns Super Metroid already knows Metroid exists; the useful suggestion is
-Castlevania.
-
-Applied when serving rather than when building, so the policy can change
-without rebuilding the index.
+which makes "Similar games" a duplicate of a franchise filter. Applied when
+serving rather than when building, so the policy can change without a rebuild.
 """
 
 from __future__ import annotations
@@ -18,13 +14,10 @@ from models.rom import Rom
 
 # Neighbours allowed from any one series before the rest are dropped. Low
 # enough that a deep franchise cannot fill the section on its own, high enough
-# that a close same-series match is not traded away for a far weaker unrelated
-# one: past the franchise, scores fall off a cliff.
+# that a close same-series match is not traded for a far weaker unrelated one.
 MAX_PER_SERIES: Final = 3
 
-# Entries to rank per entry returned. The caps below drop candidates, and a
-# shelf sitting deep in one franchise drops a lot of them, so every caller
-# ranks deeper than it intends to show.
+# Entries to rank per entry returned, since the caps below drop candidates.
 OVERFETCH_FACTOR: Final = 5
 
 T = TypeVar("T")
@@ -33,10 +26,8 @@ T = TypeVar("T")
 def series_keys(rom: Rom) -> set[str]:
     """Every series a game belongs to, franchises and collections alike.
 
-    All of them, not just the first: IGDB lists a game's franchises in no
-    stable order, so keying on one entry splits a single real series across
-    several counters. Madden titles carry both "Madden" and "NFL", and the
-    cap let four through -- two counted against each.
+    All of them, not just the first: IGDB lists franchises in no stable order,
+    so keying on one splits a single real series across several counters.
     """
     metadatum = rom.metadatum
     if metadatum is None:
@@ -60,11 +51,9 @@ def cap_by_series(
 ) -> list[T]:
     """Take items in order, allowing at most `max_per_series` from each series.
 
-    Games with no series are never capped: they have nothing to cluster on, so
-    treating them as one giant group would suppress most of an unmatched shelf.
-
-    `max_per_platform` additionally stops one platform owning the result, which
-    the personalised feed wants and a single game's "Similar games" does not.
+    Games with no series are never capped: treating them as one group would
+    suppress most of an unmatched shelf. `max_per_platform` additionally stops
+    one platform owning the result, which only the personalised feed wants.
     """
     # Positions are tracked so backfilled entries slot back into score order
     # rather than being appended after lower-scoring ones.
@@ -79,9 +68,8 @@ def cap_by_series(
             continue
 
         keys = series_keys(rom)
-        # Saturated on any one of its series is enough: a game sharing a
-        # franchise with two already-picked entries is the repetition the cap
-        # exists to stop, whichever of its franchises that happens to be.
+        # Saturated on any one of its series is enough: whichever franchise it
+        # is, a third entry from it is the repetition the cap exists to stop.
         if keys and any(counts.get(key, 0) >= max_per_series for key in keys):
             overflow.append((position, item))
             continue
@@ -101,9 +89,8 @@ def cap_by_series(
         if len(selected) >= limit:
             return [item for _, item in selected]
 
-    # A shelf sitting deep in one franchise can cap away nearly everything,
-    # leaving a section with two entries or none. A slightly repetitive row
-    # beats an empty one, so the capped-out candidates backfill it.
+    # A shelf deep in one franchise can cap away nearly everything, and a
+    # slightly repetitive row beats an empty one.
     for entry in overflow:
         if len(selected) >= limit:
             break

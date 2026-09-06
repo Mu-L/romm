@@ -49,16 +49,13 @@ MIN_EDGE_SCORE: Final = 0.05
 BUILD_BATCH_SIZE: Final = 500
 
 # Neighbours from any one franchise allowed into the stored graph. Read-time
-# diversity can only reorder what was stored, so a game sitting deep in a big
-# series would otherwise have all 24 slots taken by that series and nothing
-# left to promote.
+# diversity can only reorder what was stored, so without this a game deep in a
+# big series has nothing but that series to promote.
 MAX_STORED_PER_SERIES: Final = 6
 
-# Neighbours held per ROM while the sweep runs. A pair is scored from its
-# lower id, so every ROM needs somewhere to collect the edges other ROMs find
-# for it, and that buffer is live until the sweep reaches it. Deep enough that
-# the identity, title and series filters below can still fill MAX_NEIGHBOURS,
-# shallow enough that a 50k library does not spend hundreds of MB holding it.
+# Neighbours buffered per ROM while the sweep runs. Deep enough that the
+# filters in `_select_edges` can still fill MAX_NEIGHBOURS, shallow enough
+# that a 50k library does not spend hundreds of MB holding it.
 MAX_BUFFERED_NEIGHBOURS: Final = 64
 
 
@@ -106,12 +103,7 @@ class _PairSignals:
 
 
 def _series_tokens(feature: RomFeatures) -> set[str]:
-    """Every franchise token a game carries.
-
-    All of them rather than the first, for the same reason the serving-side
-    cap uses every value: a game listing both "Madden" and "NFL" would
-    otherwise be reserved against whichever happened to come first.
-    """
+    """Every franchise a game carries; keying on one splits a series in two."""
     return {token for token in feature.tokens if token_facet(token) == Facet.FRANCHISE}
 
 
@@ -189,9 +181,6 @@ class SimilarityBuilder:
                 first_release_date=row.first_release_date,
             )
 
-            # Platform and decade alone describe a shelf, not a game: two
-            # unmatched files from the same folder would otherwise normalise to
-            # identical vectors and score a perfect match against each other.
             if not has_taste_signal(tokens):
                 self.stats.roms_without_metadata += 1
                 continue
@@ -302,10 +291,9 @@ class SimilarityBuilder:
         batch_rom_ids: list[int] = []
         batch_edges: list[dict[str, Any]] = []
 
-        # Ascending id order is what makes the single-scoring below complete:
-        # once a ROM has been swept, every pair it belongs to has been scored
-        # (those with a lower id when *that* ROM was swept, the rest just now),
-        # so its buffer is final and can be selected from and freed.
+        # Ascending id order is what completes each buffer: once a ROM has
+        # been swept, every pair it belongs to has been scored, so its
+        # neighbours are final and the buffer can be selected from and freed.
         buffers: defaultdict[int, list[tuple[float, int]]] = defaultdict(list)
 
         for rom_id in sorted(features):
@@ -400,7 +388,7 @@ class SimilarityBuilder:
     ) -> list[dict[str, Any]]:
         """Take the best buffered neighbours, dropping ones that duplicate each other.
 
-        The pair-level check compares a candidate against the source alone, so
+        `_is_duplicate` only compares a candidate against the source, so
         without this two discs of one release would each take a slot.
         """
         rom_id = feature.rom_id
@@ -420,10 +408,9 @@ class SimilarityBuilder:
                 continue
             taken_identities |= candidate_identity
 
-            # The same game on another platform is not a recommendation, and
-            # IGDB gives every port its own id, so the id check above cannot
-            # catch it. Two ports collide with each other as readily as with
-            # the source, hence both comparisons.
+            # IGDB gives every port its own id, so the identity check above
+            # cannot catch the same game on other hardware. Ports collide with
+            # each other as readily as with the source, hence both comparisons.
             candidate_title = features[candidate_id].title_key
             if candidate_title:
                 if candidate_title == source_title or candidate_title in taken_titles:

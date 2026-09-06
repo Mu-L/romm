@@ -15,15 +15,13 @@ if TYPE_CHECKING:
 class RomSimilarity(BaseModel):
     """A precomputed edge of the item-item similarity graph.
 
-    Written wholesale by the recommendations task, never incrementally, so the
-    rows are always consistent with a single IDF snapshot of the library. Only
-    the top neighbours of each ROM are kept, which bounds the table at
-    roughly ``rom_count * MAX_NEIGHBOURS`` rows.
+    Written wholesale by the recommendations task so the rows are consistent
+    with a single IDF snapshot of the library, and only the top neighbours of
+    each ROM are kept.
 
-    Edges are stored in both directions. The scoring itself is symmetric, but
-    the per-ROM top-N cut is not (a niche game's best neighbour may not
-    reciprocate), and duplicating avoids an OR across two indexed columns on
-    every read.
+    Edges are stored in both directions: the scoring is symmetric but the
+    per-ROM top-N cut is not, and duplicating avoids an OR across two indexed
+    columns on every read.
     """
 
     __tablename__ = "rom_similarity"
@@ -48,9 +46,8 @@ class RomSimilarity(BaseModel):
         CustomJSON(), default=[]
     )
 
-    # No ORM-level delete cascade: ROMs are removed with a bulk `delete()`
-    # (see `db_rom_handler.delete_rom`), which never runs one. The foreign
-    # keys' ON DELETE CASCADE is what actually clears both directions.
+    # No ORM-level delete cascade: ROMs are removed with a bulk `delete()`,
+    # so the foreign keys' ON DELETE CASCADE is what clears both directions.
     rom: Mapped[Rom] = relationship(
         "Rom",
         foreign_keys=[rom_id],

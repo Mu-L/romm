@@ -65,9 +65,8 @@ const {
 const fetchingRecent = ref(false);
 const fetchingContinue = ref(false);
 
-// Personalised recommendations. Ranked server-side from the similarity index
-// plus this user's play history, so the row is fetched here rather than
-// derived from the ROM store's existing rails.
+// Ranked server-side from the similarity index plus this user's play history,
+// so the row is fetched here rather than derived from the store's rails.
 const recommendedRoms = ref<RecommendedRomSchema[]>([]);
 const fetchingRecommendations = ref(false);
 
@@ -77,8 +76,8 @@ async function loadRecommendations() {
     const { data } = await romApi.getRecommendedRoms();
     recommendedRoms.value = data;
   } catch {
-    // An unbuilt index or a library too small to relate anything is a normal
-    // state, not an error: the row just stays hidden.
+    // An unbuilt index, or a library too small to relate anything, is a normal
+    // state rather than an error: the row stays hidden.
     recommendedRoms.value = [];
   } finally {
     fetchingRecommendations.value = false;
@@ -408,9 +407,7 @@ function collectionCovers(c: {
         </template>
       </CardRow>
 
-      <!-- Recommended for you — each card carries the reason it was
-           suggested, so the row explains itself rather than presenting an
-           unattributed list of covers. -->
+      <!-- Recommended for you -->
       <CardRow
         v-if="
           showRecommendations &&
@@ -627,9 +624,8 @@ function collectionCovers(c: {
   padding: 24px var(--r-row-pad);
 }
 
-/* Recommendation cards stack the cover over its reason caption. The card
-   sets its own width, so the column tracks it and the caption clips to
-   match rather than widening the row's scroll track. */
+/* Stacks the cover over its reason caption. The card sets its own width, so
+   the column tracks it rather than widening the row's scroll track. */
 .r-v2-home__rec {
   display: flex;
   flex-direction: column;

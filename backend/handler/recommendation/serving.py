@@ -1,9 +1,8 @@
 """The read path behind both recommendation surfaces.
 
 "Similar games" and the personalised feed differ only in where their ranking
-comes from. Everything after that -- rank deeper than asked, hydrate, drop
-what the viewer cannot see, cap by series, truncate -- is the same, so it
-lives here rather than once per endpoint and again in the inspection tool.
+comes from; everything after that (rank deep, hydrate, drop what the viewer
+cannot see, cap by series, truncate) is shared.
 """
 
 from __future__ import annotations
@@ -11,20 +10,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from handler.auth.permissions import ResolvedPermissions
-from handler.database import db_recommendation_handler, db_rom_handler
+from handler.database import db_recommendation_handler
 from handler.recommendation.diversity import OVERFETCH_FACTOR, cap_by_series
 from handler.recommendation.feed import (
     FeedBuilder,
     RecommendedRom,
     get_cached_feed,
+    hydrate_roms,
     set_cached_feed,
 )
 from models.rom import Rom
 
-# Extra depth for a viewer whose visibility rules hide ROMs. Ranking exactly
-# `limit` and filtering afterwards hands them a short row, or an empty one when
-# the hidden games rank highest. Everyone else ranks exactly what they asked
-# for.
+# Extra depth for a viewer whose visibility rules hide ROMs: ranking exactly
+# `limit` and filtering afterwards hands them a short row, or an empty one.
 VISIBILITY_OVERFETCH = 3
 
 
@@ -38,8 +36,7 @@ def similar_roms(
     roms = _visible_roms([edge.rom_id for edge in edges], permissions)
 
     # Without the cap this section is just the franchise the user is already
-    # looking at -- five Metroid games for Super Metroid, which a franchise
-    # filter already gives them.
+    # looking at: five Metroid games for Super Metroid.
     selected = cap_by_series(edges, lambda edge: roms.get(edge.rom_id), limit=limit)
 
     return [
@@ -94,13 +91,9 @@ def _ranked_depth(limit: int, permissions: ResolvedPermissions) -> int:
 def _visible_roms(
     rom_ids: Sequence[int], permissions: ResolvedPermissions
 ) -> dict[int, Rom]:
-    """Hydrate through the shared `SimpleRomSchema` load path, viewer-filtered.
-
-    Missing-from-disk ROMs are dropped here rather than filtered in SQL, so the
-    edge queries never have to join the wide `roms` table.
-    """
+    """Hydrate through the shared load path, keeping what the viewer can see."""
     return {
-        rom.id: rom
-        for rom in db_rom_handler.get_roms_simple_by_ids(list(rom_ids))
-        if not rom.missing_from_fs and permissions.can_see_rom(rom.id, rom.platform_id)
+        rom_id: rom
+        for rom_id, rom in hydrate_roms(rom_ids).items()
+        if permissions.can_see_rom(rom.id, rom.platform_id)
     }
