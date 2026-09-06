@@ -497,7 +497,7 @@ class TestCopyAndEntry:
 
 class TestExportToFile:
     def test_media_keys_resolve_to_esde_dirs(self):
-        assert set(PEGASUS_MEDIA_KEYS.values()) <= set(PLATFORM_MEDIA_DIRS)
+        assert set(PEGASUS_MEDIA_KEYS.values()).issubset(PLATFORM_MEDIA_DIRS.keys())
 
     @staticmethod
     async def _export(
