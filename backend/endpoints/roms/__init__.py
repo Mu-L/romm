@@ -1,6 +1,7 @@
 import binascii
 import json
 from base64 import b64encode
+from dataclasses import replace
 from datetime import datetime, timezone
 from io import BytesIO
 from stat import S_IFREG
@@ -103,6 +104,7 @@ from models.rom import (
     HAS_FILE_ON_DISK_FILTERS,
     TITLE_ID_MAX_LENGTH,
     Rom,
+    RomIdentity,
     RomUserStatus,
     SaveTargetLayout,
     apply_file_stats,
@@ -113,7 +115,7 @@ from utils.background_tasks import fire_and_forget
 from utils.database import safe_int, safe_str_to_bool
 from utils.filesystem import sanitize_filename
 from utils.hashing import crc32_to_hex
-from utils.m3u import generate_m3u_content
+from utils.m3u import generate_m3u_content, playlist_files
 from utils.nginx import FileRedirectResponse, ZipContentLine, ZipResponse
 from utils.router import APIRouter
 from utils.screenshots import continue_playing_screenshot
@@ -1557,12 +1559,12 @@ async def head_rom_content(
     entries = [ZipFileEntry.from_rom_file(f, hidden_folder) for f in files]
     namespace = str(rom.id)
     cache_key = get_cache_key(namespace, entries, hidden_folder)
-    zip_path = get_cached_zip(namespace, cache_key)
-    if zip_path:
+    cached = get_cached_zip(namespace, cache_key)
+    if cached:
         return Response(
             headers={
                 "Content-Type": "application/zip",
-                "Content-Length": str(zip_path.stat().st_size),
+                "Content-Length": str(cached.stat.st_size),
                 "Accept-Ranges": "bytes",
                 "Content-Disposition": f"attachment; filename*=UTF-8''{quote(file_name)}.zip; filename=\"{quote(file_name)}.zip\"",
             },
@@ -1635,10 +1637,7 @@ async def get_rom_content(
         f"User {hl(current_username, color=BLUE)} is downloading {hl(rom.fs_name)}"
     )
 
-    # If .cue files are present, only list those in the M3U
-    # (avoids invalid entries like raw .bin tracks)
-    cue_files = [f for f in files if f.file_extension.lower() == "cue"]
-    m3u_files = cue_files if cue_files else files
+    m3u_files = playlist_files(files)
 
     # Serve the file directly in development mode for emulatorjs
     if DEV_MODE:
@@ -2662,17 +2661,19 @@ async def update_rom_identity(
 
     cleaned_data = data.model_dump(exclude_unset=True)
 
-    # Reassociating a renamed non-hashable ROM matches on this id, which only
-    # works while it is the base game's.
-    title_id = cleaned_data.get("title_id")
-    if title_id and rom.platform_slug in SWITCH_PLATFORM_SLUGS:
-        cleaned_data["title_id"] = switch.derive_base_title_id(title_id) or title_id
+    if cleaned_data.get("title_id"):
+        # Normalizing rewrites the whole triple, so it is merged onto the stored
+        # identity first rather than onto an otherwise-empty one.
+        merged = replace(RomIdentity.from_rom(rom), **cleaned_data)
+        cleaned_data = switch.normalize_identity(
+            rom.platform_slug in SWITCH_PLATFORM_SLUGS, merged
+        ).as_rom_attrs()
 
-    db_rom_handler.update_rom(id, cleaned_data)
+    updated_row = db_rom_handler.update_rom(id, cleaned_data)
 
-    # The update returns a bare row; the schema reads relationships off it.
-    updated_rom = db_rom_handler.get_rom(id)
-    if not updated_rom:
-        raise RomNotFoundInDatabaseException(id)
+    # The rom is already loaded with the relationships the schema reads.
+    for key, value in cleaned_data.items():
+        setattr(rom, key, value)
+    rom.updated_at = updated_row.updated_at
 
-    return DetailedRomSchema.from_orm_with_request(updated_rom, request)
+    return DetailedRomSchema.from_orm_with_request(rom, request)

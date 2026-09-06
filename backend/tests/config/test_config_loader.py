@@ -1,10 +1,14 @@
+import logging
 import os
 from pathlib import Path
 
+import pytest
+
 from config.config_manager import (
-    DEFAULT_EXCLUDED_DIRS,
     DEFAULT_EXCLUDED_EXTENSIONS,
     DEFAULT_EXCLUDED_FILES,
+    DEFAULT_EXCLUDED_MULTI_FILE_DIRS,
+    DEFAULT_EXCLUDED_PLATFORM_DIRS,
     ConfigManager,
 )
 
@@ -14,7 +18,9 @@ def test_config_loader():
         os.path.join(Path(__file__).resolve().parent, "fixtures", "config/config.yml")
     )
 
-    assert loader.config.EXCLUDED_PLATFORMS == sorted({*DEFAULT_EXCLUDED_DIRS, "romm"})
+    assert loader.config.EXCLUDED_PLATFORMS == sorted(
+        {*DEFAULT_EXCLUDED_PLATFORM_DIRS, "romm"}
+    )
     assert loader.config.EXCLUDED_SINGLE_EXT == sorted(
         {
             *(e.lower() for e in DEFAULT_EXCLUDED_EXTENSIONS),
@@ -26,7 +32,7 @@ def test_config_loader():
     )
     assert loader.config.EXCLUDED_MULTI_FILES == sorted(
         {
-            *DEFAULT_EXCLUDED_DIRS,
+            *DEFAULT_EXCLUDED_MULTI_FILE_DIRS,
             "my_multi_file_game",
             "DLC",
         }
@@ -102,13 +108,15 @@ def test_empty_config_loader():
         )
     )
 
-    assert loader.config.EXCLUDED_PLATFORMS == sorted(DEFAULT_EXCLUDED_DIRS)
+    assert loader.config.EXCLUDED_PLATFORMS == sorted(DEFAULT_EXCLUDED_PLATFORM_DIRS)
     assert loader.config.EXCLUDED_SINGLE_EXT == sorted(
         {e.lower() for e in DEFAULT_EXCLUDED_EXTENSIONS}
     )
     assert "ini" not in loader.config.EXCLUDED_SINGLE_EXT
     assert loader.config.EXCLUDED_SINGLE_FILES == sorted(DEFAULT_EXCLUDED_FILES)
-    assert loader.config.EXCLUDED_MULTI_FILES == sorted(DEFAULT_EXCLUDED_DIRS)
+    assert loader.config.EXCLUDED_MULTI_FILES == sorted(
+        DEFAULT_EXCLUDED_MULTI_FILE_DIRS
+    )
     assert loader.config.EXCLUDED_MULTI_PARTS_EXT == sorted(
         {e.lower() for e in DEFAULT_EXCLUDED_EXTENSIONS}
     )
@@ -350,3 +358,123 @@ def test_config_update_preserves_streaming_section(tmp_path):
             "label": "PCSX2",
         }
     ]
+
+
+def test_legacy_streaming_container_logs_deprecation_warning(caplog, tmp_path):
+    """A container without `protocol: webstation` is the deprecated
+    per-emulator broker shape and must warn, not fail, so it keeps working
+    for one more release while pointing operators at the migration guide."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(
+        "streaming:\n"
+        "  enabled: true\n"
+        "  containers:\n"
+        "    - platform: ps2\n"
+        "      host: https://192.168.1.51:3001\n"
+        "      broker_host: http://192.168.1.51:8000\n"
+        "      label: PCSX2\n"
+    )
+    # The "romm" logger has propagate=False, so caplog's handler must be
+    # added directly to it rather than relying on root-logger propagation.
+    romm_logger = logging.getLogger("romm")
+    romm_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="romm"):
+            loader = ConfigManager(str(config_file))
+    finally:
+        romm_logger.removeHandler(caplog.handler)
+
+    assert loader.config.STREAMING_CONTAINERS
+    assert "deprecated" in caplog.text
+    assert "emulator-streaming-migration" in caplog.text
+
+
+def test_webstation_streaming_container_does_not_warn(caplog, tmp_path):
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(
+        "streaming:\n"
+        "  enabled: true\n"
+        "  containers:\n"
+        "    - host: https://192.168.1.56:3010\n"
+        "      protocol: webstation\n"
+        "      subfolder: /streaming\n"
+        "      label: Emulation station\n"
+        "      platforms:\n"
+        "        ps2: pcsx2\n"
+    )
+    romm_logger = logging.getLogger("romm")
+    romm_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="romm"):
+            ConfigManager(str(config_file))
+    finally:
+        romm_logger.removeHandler(caplog.handler)
+
+    assert "deprecated" not in caplog.text
+
+
+def test_config_update_preserves_nested_container_platforms(tmp_path):
+    """A container's `platforms` map is the only nested mapping inside the
+    containers list, so it is the shape a runtime rewrite could flatten."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(
+        "streaming:\n"
+        "  enabled: true\n"
+        "  containers:\n"
+        "    - host: https://192.168.1.51:3001\n"
+        "      broker_host: http://192.168.1.51:8000\n"
+        "      label: WEBSTATION\n"
+        "      platforms:\n"
+        "        ps2: pcsx2\n"
+        "        ngc: dolphin\n"
+    )
+    loader = ConfigManager(str(config_file))
+    loader.add_platform_binding("gc", "ngc")
+
+    reloaded = ConfigManager(str(config_file))
+    assert reloaded.config.STREAMING_CONTAINERS == [
+        {
+            "host": "https://192.168.1.51:3001",
+            "broker_host": "http://192.168.1.51:8000",
+            "label": "WEBSTATION",
+            "platforms": {"ps2": "pcsx2", "ngc": "dolphin"},
+        }
+    ]
+
+
+def _write_config(tmp_path: Path, system_block: str) -> ConfigManager:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(f"system:\n{system_block}")
+    return ConfigManager(str(config_file))
+
+
+def test_platform_folder_names_are_lowercased(tmp_path):
+    loader = _write_config(
+        tmp_path,
+        '  platforms:\n    GameCube: "ngc"\n  versions:\n    NAOMI: "arcade"\n',
+    )
+
+    assert loader.config.PLATFORMS_BINDING == {"gamecube": "ngc"}
+    assert loader.config.PLATFORMS_VERSIONS == {"naomi": "arcade"}
+
+
+def test_null_platforms_block_means_empty(tmp_path):
+    loader = _write_config(tmp_path, "  platforms:\n  versions:\n")
+
+    assert loader.config.PLATFORMS_BINDING == {}
+    assert loader.config.PLATFORMS_VERSIONS == {}
+
+
+@pytest.mark.parametrize("value", ['""', "5", "~"])
+def test_platform_binding_must_be_a_non_empty_string(tmp_path, value):
+    with pytest.raises(SystemExit) as excinfo:
+        _write_config(tmp_path, f"  platforms:\n    gamecube: {value}\n")
+
+    assert excinfo.value.code == 3
+
+
+def test_platform_binding_lookup_ignores_case(tmp_path):
+    loader = _write_config(tmp_path, '  platforms:\n    GameCube: "ngc"\n')
+
+    loader.remove_platform_binding("GAMECUBE")
+    assert loader.config.PLATFORMS_BINDING == {}

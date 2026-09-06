@@ -18,8 +18,8 @@ and indexes that depend on them recreated around it. Only rows carrying Steam
 metadata can change value, so the facet and virtual-collection refreshes are
 limited to those.
 
-Revision ID: 0122_steam_facet_sources
-Revises: 0121_rating_count_column
+Revision ID: 0125_steam_facet_sources
+Revises: 0124_rating_count_column
 Create Date: 2026-09-03 00:00:00.000000
 
 """
@@ -30,8 +30,8 @@ from alembic import op  # type: ignore[attr-defined]
 from utils.database import is_postgresql
 
 # revision identifiers, used by Alembic.
-revision = "0122_steam_facet_sources"
-down_revision = "0121_rating_count_column"
+revision = "0125_steam_facet_sources"
+down_revision = "0124_rating_count_column"
 branch_labels = None
 depends_on = None
 

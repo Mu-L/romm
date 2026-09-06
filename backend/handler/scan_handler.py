@@ -6,7 +6,10 @@ from typing import Any
 import pydash
 import socketio  # type: ignore
 
-from adapters.services.screenscraper import ScreenScraperRateLimitError
+from adapters.services.screenscraper import (
+    ScreenScraperRateLimitError,
+    is_breaker_tripped,
+)
 from config.config_manager import config_manager as cm
 from endpoints.responses.rom import SimpleRomSchema
 from handler.database import db_platform_handler, db_rom_handler
@@ -71,14 +74,15 @@ from handler.metadata.steam_handler import STEAM_PLATFORMS, SteamRom
 from logger.formatter import BLUE, LIGHTYELLOW
 from logger.formatter import highlight as hl
 from logger.logger import log
-from models.assets import Save, Screenshot, State
+from models.assets import MemoryCardVersion, Save, Screenshot, State
 from models.firmware import Firmware
 from models.platform import Platform
-from models.rom import Rom, RomFile, RomFileCategory
+from models.rom import Rom, RomFile, RomFileCategory, RomIdentity
 from models.user import User
 from utils import emoji
 from utils.audio_tags import persist_embedded_cover, remove_persisted_cover
 from utils.filesystem import sanitize_filename
+from utils.platform_aliases import resolve_fs_slug, resolve_platform_slug
 
 LOGGER_MODULE_NAME = {"module_name": "scan"}
 
@@ -180,8 +184,8 @@ def build_hashless_fs_rom(fs_name: str, *, flat: bool) -> FSRom:
 def get_main_platform_igdb_id(platform: Platform):
     cnfg = cm.get_config()
 
-    if platform.fs_slug in cnfg.PLATFORMS_VERSIONS.keys():
-        main_platform_slug = cnfg.PLATFORMS_VERSIONS[platform.fs_slug]
+    main_platform_slug = cnfg.PLATFORMS_VERSIONS.get(platform.fs_slug.lower())
+    if main_platform_slug:
         main_platform = db_platform_handler.get_platform_by_fs_slug(main_platform_slug)
         if main_platform:
             main_platform_igdb_id = main_platform.igdb_id
@@ -284,8 +288,6 @@ async def scan_platform(
     platform_attrs["fs_slug"] = fs_slug
 
     cnfg = cm.get_config()
-    swapped_platform_bindings = {v: k for k, v in cnfg.PLATFORMS_BINDING.items()}
-    swapped_platform_versions = {v: k for k, v in cnfg.PLATFORMS_VERSIONS.items()}
 
     # Sometimes users change the name of the folder, so we try to match it with the config
     if fs_slug not in fs_platforms:
@@ -293,24 +295,13 @@ async def scan_platform(
             f"{hl(fs_slug)} not found in file system, trying to match via config",
             extra=LOGGER_MODULE_NAME,
         )
-        if fs_slug in swapped_platform_bindings.keys():
-            platform = db_platform_handler.get_platform_by_fs_slug(fs_slug)
-            if platform:
-                platform_attrs["fs_slug"] = swapped_platform_bindings[platform.slug]
-        elif fs_slug in swapped_platform_versions.keys():
-            platform = db_platform_handler.get_platform_by_fs_slug(fs_slug)
-            if platform:
-                platform_attrs["fs_slug"] = swapped_platform_versions[platform.slug]
+        platform = db_platform_handler.get_platform_by_fs_slug(fs_slug)
+        if platform:
+            known_fs_slug = resolve_fs_slug(platform.slug, cnfg)
+            if known_fs_slug:
+                platform_attrs["fs_slug"] = known_fs_slug
 
-    try:
-        if fs_slug in cnfg.PLATFORMS_BINDING.keys():
-            platform_attrs["slug"] = cnfg.PLATFORMS_BINDING[fs_slug]
-        elif fs_slug in cnfg.PLATFORMS_VERSIONS.keys():
-            platform_attrs["slug"] = cnfg.PLATFORMS_VERSIONS[fs_slug]
-        else:
-            platform_attrs["slug"] = fs_slug
-    except (KeyError, TypeError, AttributeError):
-        platform_attrs["slug"] = fs_slug
+    platform_attrs["slug"] = resolve_platform_slug(fs_slug, cnfg)
 
     igdb_platform = meta_igdb_handler.get_platform(platform_attrs["slug"])
     moby_platform = meta_moby_handler.get_platform(platform_attrs["slug"])
@@ -519,9 +510,7 @@ async def scan_rom(
         "md5_hash": rom.md5_hash,
         "sha1_hash": rom.sha1_hash,
         "ra_hash": rom.ra_hash,
-        "title_id": rom.title_id,
-        "save_target": rom.save_target,
-        "save_target_layout": rom.save_target_layout,
+        **RomIdentity.from_rom(rom).as_rom_attrs(),
         "fs_size_bytes": rom.fs_size_bytes,
         "is_physical": rom.is_physical,
         "upc": rom.upc,
@@ -542,14 +531,12 @@ async def scan_rom(
 
         # Only overwrite title id values when extraction produced them, so a
         # hash-only or extraction-disabled rescan can't wipe existing ones.
-        if fs_rom.get("title_id"):
-            rom_attrs.update(
-                {
-                    "title_id": fs_rom.get("title_id"),
-                    "save_target": fs_rom.get("save_target"),
-                    "save_target_layout": fs_rom.get("save_target_layout"),
-                }
-            )
+        identity = fs_rom.get("identity")
+        if identity and identity.title_id:
+            rom_attrs.update(identity.as_rom_attrs())
+            # Metadata matching reads the id off the instance, so a first scan
+            # searches by what was just extracted rather than the old value.
+            rom.title_id = identity.title_id
 
     # Update properties from existing rom if not a complete rescan
     if not newly_added and scan_type != ScanType.COMPLETE:
@@ -598,6 +585,28 @@ async def scan_rom(
                 "steam_metadata": rom.steam_metadata,
             }
         )
+
+    is_complete_rescan = not newly_added and scan_type == ScanType.COMPLETE
+
+    # Sources whose lookup actually ran. One skipped because the platform carries
+    # no id for it never enters the set, so a rescan can't clear what it can't redo.
+    attempted_sources: set[MetadataSource] = set()
+
+    def resolve_fetch(source: MetadataSource, result: Any, fallback: Any) -> Any:
+        """Unwrap a gathered lookup, falling back to an empty match when it failed."""
+        if not isinstance(result, BaseException):
+            return result
+        if not isinstance(result, Exception):
+            raise result
+
+        # A provider that blew up ruled nothing out, so it no longer counts as
+        # attempted and a complete rescan keeps the id it already had.
+        attempted_sources.discard(source)
+        log.error(
+            f"Error fetching {hl(source)} metadata for {hl(rom_attrs['fs_name'])}: {result}",
+            extra=LOGGER_MODULE_NAME,
+        )
+        return fallback
 
     @functools.cache
     def get_match_files() -> list[RomFile]:
@@ -704,6 +713,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.IGDB)
             # Use Hasheous match to get the IGDB ID
             h_igdb_id = hasheous_rom.get("igdb_id")
             if h_igdb_id:
@@ -750,6 +760,7 @@ async def scan_rom(
                 and (not rom.gamelist_id or not rom.gamelist_metadata)
             )
         ):
+            attempted_sources.add(MetadataSource.GAMELIST)
             return await meta_gamelist_handler.get_rom(
                 rom_attrs["fs_name"], platform, rom
             )
@@ -771,6 +782,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.FLASHPOINT)
             if (scan_type == ScanType.UPDATE and rom.flashpoint_id) or (
                 scan_type == ScanType.UNMATCHED
                 and rom.flashpoint_id
@@ -795,6 +807,7 @@ async def scan_rom(
                 or (scan_type == ScanType.UNMATCHED and not rom.libretro_id)
             )
         ):
+            attempted_sources.add(MetadataSource.LIBRETRO)
             return await meta_libretro_handler.get_rom(
                 rom_attrs["fs_name"], platform.slug
             )
@@ -815,6 +828,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.HLTB)
             # A refresh keeps the ID already on the ROM, often a manual match,
             # rather than trading it for a filename guess. COMPLETE rematches.
             if rom.hltb_id and (
@@ -837,6 +851,7 @@ async def scan_rom(
                 and (not rom.demozoo_id or not rom.demozoo_metadata)
             )
         ):
+            attempted_sources.add(MetadataSource.DEMOZOO)
             return await meta_demozoo_handler.get_rom(
                 rom_attrs["fs_name"], platform.slug
             )
@@ -852,6 +867,7 @@ async def scan_rom(
                 and (not rom.pouet_id or not rom.pouet_metadata)
             )
         ):
+            attempted_sources.add(MetadataSource.POUET)
             if rom.pouet_id:
                 return await meta_pouet_handler.get_rom_by_id(int(rom.pouet_id))
             return await meta_pouet_handler.get_rom(rom_attrs["fs_name"], platform.slug)
@@ -867,6 +883,7 @@ async def scan_rom(
                 and (not rom.csdb_id or not rom.csdb_metadata)
             )
         ):
+            attempted_sources.add(MetadataSource.CSDB)
             if rom.csdb_id:
                 return await meta_csdb_handler.get_rom_by_id(int(rom.csdb_id))
             return await meta_csdb_handler.get_rom(rom_attrs["fs_name"], platform.slug)
@@ -886,6 +903,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.STEAM)
             return await resolve_steam_rom(
                 rom=rom,
                 fs_name=str(rom_attrs["fs_name"]),
@@ -910,6 +928,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.MOBY)
             if scan_type == ScanType.UPDATE and rom.moby_id:
                 return await meta_moby_handler.get_rom_by_id(rom.moby_id)
 
@@ -922,7 +941,7 @@ async def scan_rom(
                 return await meta_moby_handler.get_rom_by_id(playmatch_rom["moby_id"])
 
             return await meta_moby_handler.get_rom(
-                rom_attrs["fs_name"], platform_moby_id=platform.moby_id
+                rom, rom_attrs["fs_name"], platform_moby_id=platform.moby_id
             )
 
         return MobyGamesRom(moby_id=None)
@@ -942,6 +961,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.SS)
             # One refusal means the per-minute budget is already spent, so give
             # up on this ROM rather than spending another retried request (and
             # its backoff) on the fallback lookups.
@@ -974,6 +994,7 @@ async def scan_rom(
                 )
             except ScreenScraperRateLimitError:
                 note_rate_limited_rom(rom_attrs["fs_name"])
+                attempted_sources.discard(MetadataSource.SS)
                 return SSRom(ss_id=None)
 
         return SSRom(ss_id=None)
@@ -991,6 +1012,7 @@ async def scan_rom(
                 and rom.platform_slug in LAUNCHBOX_PLATFORM_LIST
             )
         ):
+            attempted_sources.add(MetadataSource.LAUNCHBOX)
             launchbox_rom = await resolve_launchbox_rom(
                 rom=rom,
                 fs_name=str(rom_attrs["fs_name"]),
@@ -1024,6 +1046,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.RA)
             # Use Hasheous match to get the RA ID
             h_ra_id = hasheous_rom.get("ra_id")
             if h_ra_id:
@@ -1061,6 +1084,7 @@ async def scan_rom(
                 )
             )
         ):
+            attempted_sources.add(MetadataSource.HASHEOUS)
             (
                 igdb_game,
                 ra_game,
@@ -1083,46 +1107,55 @@ async def scan_rom(
     # others' results for this ROM, so each failure falls back to an empty match.
     provider_fetches = (
         (
+            MetadataSource.IGDB,
             fetch_igdb_rom(playmatch_hash_match, hasheous_hash_match),
             IGDBRom(igdb_id=None),
         ),
-        (fetch_moby_rom(playmatch_hash_match), MobyGamesRom(moby_id=None)),
-        (fetch_ss_rom(playmatch_hash_match), SSRom(ss_id=None)),
-        (fetch_ra_rom(hasheous_hash_match), RAGameRom(ra_id=None)),
         (
+            MetadataSource.MOBY,
+            fetch_moby_rom(playmatch_hash_match),
+            MobyGamesRom(moby_id=None),
+        ),
+        (MetadataSource.SS, fetch_ss_rom(playmatch_hash_match), SSRom(ss_id=None)),
+        (MetadataSource.RA, fetch_ra_rom(hasheous_hash_match), RAGameRom(ra_id=None)),
+        (
+            MetadataSource.LAUNCHBOX,
             fetch_launchbox_rom(platform.slug, playmatch_hash_match),
             LaunchboxRom(launchbox_id=None),
         ),
         (
+            MetadataSource.HASHEOUS,
             fetch_hasheous_rom(hasheous_hash_match),
             HasheousRom(hasheous_id=None, igdb_id=None, tgdb_id=None, ra_id=None),
         ),
-        (fetch_flashpoint_rom(), FlashpointRom(flashpoint_id=None)),
-        (fetch_hltb_rom(), HLTBRom(hltb_id=None)),
-        (fetch_demozoo_rom(), DemozooRom(demozoo_id=None)),
-        (fetch_pouet_rom(), PouetRom(pouet_id=None)),
-        (fetch_csdb_rom(), CsdbRom(csdb_id=None)),
-        (fetch_steam_rom(), SteamRom(steam_id=None)),
-        (fetch_gamelist_rom(), GamelistRom(gamelist_id=None)),
-        (fetch_libretro_rom(), LibretroRom(libretro_id=None)),
+        (
+            MetadataSource.FLASHPOINT,
+            fetch_flashpoint_rom(),
+            FlashpointRom(flashpoint_id=None),
+        ),
+        (MetadataSource.HLTB, fetch_hltb_rom(), HLTBRom(hltb_id=None)),
+        (MetadataSource.DEMOZOO, fetch_demozoo_rom(), DemozooRom(demozoo_id=None)),
+        (MetadataSource.POUET, fetch_pouet_rom(), PouetRom(pouet_id=None)),
+        (MetadataSource.CSDB, fetch_csdb_rom(), CsdbRom(csdb_id=None)),
+        (MetadataSource.STEAM, fetch_steam_rom(), SteamRom(steam_id=None)),
+        (MetadataSource.GAMELIST, fetch_gamelist_rom(), GamelistRom(gamelist_id=None)),
+        (MetadataSource.LIBRETRO, fetch_libretro_rom(), LibretroRom(libretro_id=None)),
     )
     fetch_results = await asyncio.gather(
-        *(coro for coro, _ in provider_fetches), return_exceptions=True
+        *(coro for _, coro, _ in provider_fetches), return_exceptions=True
     )
 
-    resolved: list[Any] = []
-    for (_, fallback), result in zip(provider_fetches, fetch_results, strict=True):
-        if isinstance(result, BaseException):
-            if not isinstance(result, Exception):
-                raise result
-            provider = fallback.__class__.__name__
-            log.error(
-                f"Error fetching {hl(provider)} metadata for {hl(rom_attrs['fs_name'])}: {result}",
-                extra=LOGGER_MODULE_NAME,
-            )
-            resolved.append(fallback)
-        else:
-            resolved.append(result)
+    resolved: list[Any] = [
+        resolve_fetch(source, result, fallback)
+        for (source, _, fallback), result in zip(
+            provider_fetches, fetch_results, strict=True
+        )
+    ]
+
+    # Once a ScreenScraper breaker trips, the remaining lookups answer empty
+    # without asking, so it has ruled nothing out for this rom either.
+    if is_breaker_tripped():
+        attempted_sources.discard(MetadataSource.SS)
 
     (
         igdb_handler_rom,
@@ -1295,11 +1328,11 @@ async def scan_rom(
         },
     }
 
-    # For COMPLETE rescans, explicitly clear metadata IDs and metadata for unselected sources
-    # This ensures that when a source is no longer selected, its data is removed from the ROM
-    if not newly_added and scan_type == ScanType.COMPLETE:
+    # Reset the id and blob of every source this rescan could rematch: the ones it
+    # consulted, whose miss has to undo the old match, and the deselected ones.
+    if is_complete_rescan:
         for source, fields in metadata_handlers.items():
-            if source not in metadata_sources:
+            if source in attempted_sources or source not in metadata_sources:
                 rom_attrs[fields["id_field"]] = None
                 if fields["metadata_field"]:
                     rom_attrs[fields["metadata_field"]] = {}
@@ -1457,6 +1490,7 @@ async def scan_rom(
             or (scan_type == ScanType.UPDATE and rom.sgdb_id)
             or (scan_type == ScanType.UNMATCHED and not rom.sgdb_id)
         ):
+            attempted_sources.add(MetadataSource.SGDB)
             if scan_type == ScanType.UPDATE and rom.sgdb_id:
                 return await meta_sgdb_handler.get_rom_by_id(rom.sgdb_id)
 
@@ -1485,7 +1519,19 @@ async def scan_rom(
 
         return SGDBRom(sgdb_id=None)
 
-    sgdb_hander_rom = await fetch_sgdb_details(playmatch_hash_match)
+    # SteamGridDB searches on the names the other providers just produced, so it
+    # can't join the gather above, but it resolves the same way.
+    (sgdb_result,) = await asyncio.gather(
+        fetch_sgdb_details(playmatch_hash_match), return_exceptions=True
+    )
+    sgdb_hander_rom = resolve_fetch(
+        MetadataSource.SGDB, sgdb_result, SGDBRom(sgdb_id=None)
+    )
+
+    # Resolving this late means missing the reset block above, so clear its id here.
+    if is_complete_rescan and MetadataSource.SGDB in attempted_sources:
+        rom_attrs["sgdb_id"] = None
+
     if sgdb_hander_rom.get("sgdb_id"):
         rom_attrs["sgdb_id"] = sgdb_hander_rom["sgdb_id"]
 
@@ -1654,6 +1700,30 @@ async def scan_state(
     )
     scanned_asset = await _scan_asset(file_name, states_path)
     return State(**scanned_asset)
+
+
+async def scan_memory_card_version(
+    file_name: str,
+    user: User,
+    emulator: str,
+    card_id: int,
+    content_hash: str | None = None,
+) -> MemoryCardVersion:
+    """Scan a card archive that is already on disk.
+
+    `content_hash` skips the re-read: a caller that hashed the same bytes in
+    memory has the answer already, and a card archive runs to hundreds of
+    megabytes.
+    """
+    cards_path = fs_asset_handler.build_memory_cards_file_path(
+        user=user, emulator=emulator, card_id=card_id
+    )
+    scanned_asset = await _scan_asset(
+        file_name, cards_path, should_hash=content_hash is None
+    )
+    if content_hash is not None:
+        scanned_asset["content_hash"] = content_hash
+    return MemoryCardVersion(**scanned_asset, memory_card_id=card_id)
 
 
 async def scan_screenshot(
