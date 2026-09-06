@@ -31,23 +31,26 @@ import random
 import shlex
 import sys
 from collections import Counter
-from typing import Any
+from typing import Any, NamedTuple
 
 # Allow running as `python3 tools/inspect_recommendations.py` from backend/.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sqlalchemy import distinct, func, select  # noqa: E402
 
+from handler.auth.permissions import (  # noqa: E402
+    ResolvedPermissions,
+    resolve_permissions,
+)
 from handler.database import (  # noqa: E402
     db_recommendation_handler,
-    db_rom_handler,
     db_user_handler,
 )
 from handler.database.base_handler import sync_session  # noqa: E402
 from handler.recommendation import (  # noqa: E402
-    FeedBuilder,
     SimilarityBuilder,
-    cap_by_series,
+    recommended_roms,
+    similar_roms,
 )
 from models.platform import Platform  # noqa: E402
 from models.recommendation import RomSimilarity  # noqa: E402
@@ -156,22 +159,38 @@ def find_rom_ids_by_name(needle: str, limit: int) -> list[int]:
         return [row[0] for row in session.execute(stmt).all()]
 
 
-def neighbours_of(rom_id: int, limit: int, capped: bool) -> list[Any]:
-    """The edges a surface would render, over-fetched and capped like the endpoint."""
-    edges = db_recommendation_handler.get_similar_rom_edges(rom_id, limit=limit * 4)
-    if not edges:
-        return []
+# No request behind a CLI run, and the point is to see the whole index.
+_UNRESTRICTED = ResolvedPermissions(
+    is_admin=True,
+    user_id=None,
+    grants=frozenset(),
+    hidden_platform_ids=frozenset(),
+    hidden_rom_ids=frozenset(),
+)
 
-    if not capped:
-        return edges[:limit]
 
-    hydrated = {
-        rom.id: rom
-        for rom in db_rom_handler.get_roms_simple_by_ids(
-            [edge.rom_id for edge in edges]
-        )
-    }
-    return cap_by_series(edges, lambda edge: hydrated.get(edge.rom_id), limit=limit)
+class Neighbour(NamedTuple):
+    score: float
+    rom_id: int
+    reasons: list[dict[str, Any]]
+
+
+def neighbours_of(rom_id: int, limit: int, capped: bool) -> list[Neighbour]:
+    """What a surface would render, through the same path the endpoint uses.
+
+    `capped=False` reads the stored edges straight back instead, which is how
+    you see what the series cap is actually removing.
+    """
+    if capped:
+        return [
+            Neighbour(item.score, item.rom.id, item.reasons)
+            for item in similar_roms(rom_id, limit=limit, permissions=_UNRESTRICTED)
+        ]
+
+    return [
+        Neighbour(edge.score, edge.rom_id, edge.reasons)
+        for edge in db_recommendation_handler.get_similar_rom_edges(rom_id, limit=limit)
+    ]
 
 
 def print_rom(
@@ -212,7 +231,12 @@ def print_feed(username: str, limit: int) -> int:
     print(f"Personalised feed for {username}")
     print("-" * 78)
 
-    feed = FeedBuilder(user.id).build(limit=limit)
+    feed = recommended_roms(
+        user.id,
+        limit=limit,
+        permissions=resolve_permissions(user),
+        refresh=True,
+    )
     if not feed:
         print("  (empty -- no play history and no rated games in the library)")
         return 0

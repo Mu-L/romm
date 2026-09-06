@@ -3,18 +3,17 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from endpoints.responses.rom import SimpleRomSchema
+from handler.recommendation.scoring import Facet
 
 
 class SimilarityReasonSchema(BaseModel):
     """Why two games were linked, e.g. {"facet": "franchise", "value": "Metroid"}.
 
-    `facet` is one of the metadata facets the engine scores on (genre,
-    franchise, collection, company, game_mode, decade), or "igdb" when the
-    link came from IGDB's own related-games list, or "top_rated" for the
-    cold-start feed. The frontend maps it to a translated label.
+    `value` is empty for the facets that carry no value of their own, which the
+    frontend renders as a translated phrase instead.
     """
 
-    facet: str
+    facet: Facet
     value: str
 
 

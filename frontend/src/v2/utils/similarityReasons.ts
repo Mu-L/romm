@@ -1,4 +1,4 @@
-import type { SimilarityReasonSchema } from "@/__generated__";
+import type { Facet, SimilarityReasonSchema } from "@/__generated__";
 
 /**
  * Maps a recommendation reason onto an icon and a display label.
@@ -7,9 +7,12 @@ import type { SimilarityReasonSchema } from "@/__generated__";
  * display that value directly, since "Metroid" explains the match better
  * than "Same franchise" does. Facets with no meaningful value of their own
  * fall back to a translated phrase.
+ *
+ * Both maps are keyed by the generated `Facet` union, so adding a facet to
+ * the backend enum fails the build here until it is given an icon.
  */
 
-const FACET_ICONS: Record<string, string> = {
+const FACET_ICONS: Record<Facet, string> = {
   collection: "mdi-bookmark-multiple-outline",
   franchise: "mdi-star-outline",
   developer: "mdi-domain",
@@ -26,16 +29,14 @@ const FACET_ICONS: Record<string, string> = {
   top_rated: "mdi-trophy-outline",
 };
 
-const DEFAULT_ICON = "mdi-tag-outline";
-
 /** Facets rendered as a translated phrase rather than their raw value. */
-const TRANSLATED_FACETS: Record<string, string> = {
+const TRANSLATED_FACETS: Partial<Record<Facet, string>> = {
   igdb: "recommendations.reason-igdb",
   top_rated: "recommendations.reason-top-rated",
 };
 
 export function reasonIcon(reason: SimilarityReasonSchema): string {
-  return FACET_ICONS[reason.facet] ?? DEFAULT_ICON;
+  return FACET_ICONS[reason.facet];
 }
 
 export function reasonLabel(

@@ -11,7 +11,7 @@ from decorators.database import begin_session
 from models.collection import CollectionRom
 from models.play_session import PlaySession
 from models.recommendation import RomSimilarity
-from models.rom import Rom, RomFacets, RomMetadata, RomUser
+from models.rom import IDENTITY_ID_FIELDS, Rom, RomFacets, RomMetadata, RomUser
 
 from .base_handler import DBBaseHandler
 
@@ -26,10 +26,12 @@ EDGE_INSERT_CHUNK_SIZE = 1_000
 # relate its entire contents to itself.
 MAX_CO_OCCURRENCE_SET_SIZE = 250
 
-# Provider ids that name a game rather than a file. Two ROMs sharing any of
-# them are one title (regions, revisions, storefront copies) and must never be
-# recommended for each other.
-IDENTITY_ID_COLUMNS = (RomFacets.igdb_id, RomFacets.steam_id)
+# Two ROMs sharing any of these are one title and must never be recommended
+# for each other. Read off the same list `sibling_roms` matches on, so the two
+# agree on what "the same game" means; unlike that view this is not scoped to a
+# platform, since a game reissued on other hardware is no more a suggestion
+# than a second copy on the same one.
+IDENTITY_ID_COLUMNS = tuple(getattr(RomFacets, field) for field in IDENTITY_ID_FIELDS)
 
 # Votes a rating needs before it is trusted on its own in the cold-start feed.
 # Below this it is blended with the library mean; well above it, the raw rating

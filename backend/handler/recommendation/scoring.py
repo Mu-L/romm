@@ -10,32 +10,61 @@ nothing and that "Metroidvania" says a great deal, without anyone tuning it.
 
 from __future__ import annotations
 
+import enum
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
+
+class Facet(enum.StrEnum):
+    """Every axis a recommendation can be explained by.
+
+    Reaches the API as the `facet` of a similarity reason, so the generated
+    frontend types are a closed union and a new member cannot be added here
+    without the UI failing to compile until it maps one.
+    """
+
+    COLLECTION = "collection"
+    FRANCHISE = "franchise"
+    GENRE = "genre"
+    PERSPECTIVE = "perspective"
+    THEME = "theme"
+    KEYWORD = "keyword"
+    DEVELOPER = "developer"
+    PUBLISHER = "publisher"
+    COMPANY = "company"
+    GAME_MODE = "game_mode"
+    PLATFORM = "platform"
+    DECADE = "decade"
+
+    # Not scored, and carry no value of their own: where the link came from
+    # when it was not metadata overlap.
+    IGDB = "igdb"
+    TOP_RATED = "top_rated"
+
+
 # Relative pull of each facet before IDF weighting. A shared series or
 # franchise is far stronger evidence of "you will like this too" than a shared
 # genre, and platform/decade are context rather than taste.
 FACET_WEIGHTS: Final[Mapping[str, float]] = {
-    "collection": 3.0,
-    "franchise": 2.5,
-    "genre": 1.0,
+    Facet.COLLECTION: 3.0,
+    Facet.FRANCHISE: 2.5,
+    Facet.GENRE: 1.0,
     # IGDB's curated viewpoint list. "Side view" versus "First person" says
     # more about how a game plays than most genre labels do.
-    "perspective": 1.0,
+    Facet.PERSPECTIVE: 1.0,
     # A secondary genre axis (Horror, Comedy, Fantasy), curated and low
     # cardinality, so it earns close to a genre's weight.
-    "theme": 0.9,
+    Facet.THEME: 0.9,
     # Community tags. High cardinality and mixed quality ("motorcycle" sits
     # beside "metroidvania"), so IDF does most of the work and the weight
     # stays below the curated facets. This is the least settled of the
     # weights: on a 12.7k library 0.8 surfaced real golf games for Golf while
     # 0.5 kept 2D Mario platformers ahead of Mario Tennis. Revisit with the
     # inspection tool against a real shelf before trusting it.
-    "keyword": 0.7,
+    Facet.KEYWORD: 0.7,
     # Who actually made it. Set to what the merged `company` facet carried
     # before the split, so separating the roles redistributes that weight
     # rather than adding new influence.
@@ -44,19 +73,19 @@ FACET_WEIGHTS: Final[Mapping[str, float]] = {
     # (Treasure, Sacnoth) hold their matches at every value because their
     # games also share genre and theme, and wide-ranging ones (Neversoft)
     # only improve at the very bottom of the range.
-    "developer": 0.7,
+    Facet.DEVELOPER: 0.7,
     # Who shipped it. A label spans everything it ever released, and regional
     # distributors land here too -- Tec Toy alone covers 774 games on a 15k
     # library, dense enough that IDF does not suppress it on its own.
-    "publisher": 0.25,
+    Facet.PUBLISHER: 0.25,
     # Used only where no provider reported roles, so the role is unknown and
     # the value could be either. Below genre for the same reason publisher is.
-    "company": 0.7,
+    Facet.COMPANY: 0.7,
     # Nearly every game is "Single player", so this mostly rides along; IDF
     # already flattens it and the low weight keeps it from breaking ties.
-    "game_mode": 0.4,
-    "platform": 0.4,
-    "decade": 0.3,
+    Facet.GAME_MODE: 0.4,
+    Facet.PLATFORM: 0.4,
+    Facet.DECADE: 0.3,
 }
 
 # Facets present on more than this share of the library describe the library,
@@ -65,6 +94,10 @@ FACET_WEIGHTS: Final[Mapping[str, float]] = {
 # postings list covering most of the shelf.
 MAX_CANDIDATE_DF_RATIO: Final = 0.20
 MAX_CANDIDATE_POSTINGS: Final = 2_000
+# Soft ceiling on candidates gathered per ROM, reached only by games whose
+# every facet is rare. The last posting list is taken whole, so the set can
+# overshoot by up to one bucket.
+MAX_CANDIDATES_PER_ROM: Final = 1_500
 # ...but the ratio only makes sense once there is a library to take a ratio of.
 # Below this, expanding every token is cheap, and skipping them would leave a
 # small shelf with no candidates at all.
@@ -98,16 +131,10 @@ MAX_QUALITY_BONUS: Final = 0.05
 # from 1363 to 1384.
 PIVOT_B: Final = 0.0
 
-# Release proximity matters, but only softly: a decade token already carries
-# most of the era signal.
-SAME_DECADE_TOKEN: Final = "decade"
-
-
-# Facets that describe the game itself rather than where it sits on the shelf.
-# A ROM carrying none of these has nothing to be similar *about*: platform and
-# decade alone would make every unmatched file in a folder a perfect match for
-# every other, since both vectors normalise to the same thing.
-CONTEXT_FACETS: Final[frozenset[str]] = frozenset({"platform", SAME_DECADE_TOKEN})
+# Facets that place a game on the shelf rather than describe it. A ROM
+# carrying only these has nothing to be similar *about*: two unmatched files in
+# one folder would otherwise normalise to identical vectors.
+CONTEXT_FACETS: Final[frozenset[str]] = frozenset({Facet.PLATFORM, Facet.DECADE})
 TASTE_FACETS: Final[frozenset[str]] = frozenset(FACET_WEIGHTS) - CONTEXT_FACETS
 
 
@@ -116,7 +143,7 @@ def has_taste_signal(tokens: Sequence[str]) -> bool:
     return any(token_facet(token) in TASTE_FACETS for token in tokens)
 
 
-def make_token(facet: str, value: str) -> str:
+def make_token(facet: Facet, value: str) -> str:
     """Namespace a facet value so genre:Action never collides with tag:Action."""
     return f"{facet}:{value}"
 
@@ -164,32 +191,32 @@ def extract_tokens(
     # to the merged one otherwise. Emitting both would count an IGDB-matched
     # game's studio twice while a game matched elsewhere counted once.
     has_roles = bool(developers) or bool(publishers)
-    company_facets: tuple[tuple[str, Sequence[str] | None], ...] = (
-        (("developer", developers), ("publisher", publishers))
+    company_facets: tuple[tuple[Facet, Sequence[str] | None], ...] = (
+        ((Facet.DEVELOPER, developers), (Facet.PUBLISHER, publishers))
         if has_roles
-        else (("company", companies),)
+        else ((Facet.COMPANY, companies),)
     )
 
     for facet, values in (
-        ("genre", genres),
-        ("franchise", franchises),
-        ("collection", collections),
+        (Facet.GENRE, genres),
+        (Facet.FRANCHISE, franchises),
+        (Facet.COLLECTION, collections),
         *company_facets,
-        ("game_mode", game_modes),
-        ("keyword", keywords),
-        ("theme", themes),
-        ("perspective", player_perspectives),
+        (Facet.GAME_MODE, game_modes),
+        (Facet.KEYWORD, keywords),
+        (Facet.THEME, themes),
+        (Facet.PERSPECTIVE, player_perspectives),
     ):
         for value in values or ():
             cleaned = (value or "").strip()
             if cleaned:
                 tokens.append(make_token(facet, cleaned))
 
-    tokens.append(make_token("platform", str(platform_id)))
+    tokens.append(make_token(Facet.PLATFORM, str(platform_id)))
 
     year = release_year_from_epoch(first_release_date)
     if year is not None:
-        tokens.append(make_token(SAME_DECADE_TOKEN, str(year // 10 * 10)))
+        tokens.append(make_token(Facet.DECADE, str(year // 10 * 10)))
 
     # dict.fromkeys keeps first-seen order, which keeps reasons deterministic.
     return tuple(dict.fromkeys(tokens))
@@ -339,7 +366,7 @@ def shared_reasons(
     # once the curated facets are exhausted, where "interconnected-world" says
     # something no genre can.
     contributions.sort(
-        key=lambda pair: (token_facet(pair[1]) == "keyword", -pair[0], pair[1])
+        key=lambda pair: (token_facet(pair[1]) == Facet.KEYWORD, -pair[0], pair[1])
     )
 
     reasons: list[dict[str, str]] = []
@@ -348,7 +375,7 @@ def shared_reasons(
         facet = token_facet(token)
         # One reason per facet: three shared genres reads worse than a genre,
         # a company and a decade.
-        if facet in seen_facets or facet == "platform":
+        if facet in seen_facets or facet == Facet.PLATFORM:
             continue
         seen_facets.add(facet)
         reasons.append({"facet": facet, "value": token_value(token)})
@@ -413,12 +440,21 @@ def candidate_ids(
         MAX_CANDIDATE_POSTINGS,
         max(MIN_CANDIDATE_DF, int(total_documents * MAX_CANDIDATE_DF_RATIO)),
     )
-    candidates: set[int] = set()
+    buckets = sorted(
+        (
+            bucket
+            for token in feature.tokens
+            if (bucket := postings.get(token)) and len(bucket) <= df_cap
+        ),
+        key=len,
+    )
 
-    for token in feature.tokens:
-        bucket = postings.get(token)
-        if not bucket or len(bucket) > df_cap:
-            continue
+    candidates: set[int] = set()
+    for bucket in buckets:
+        # Rarest facet first, so a ROM that trips the ceiling keeps its most
+        # discriminative neighbours rather than whichever token came first.
+        if len(candidates) >= MAX_CANDIDATES_PER_ROM:
+            break
         candidates.update(bucket)
 
     candidates.discard(feature.rom_id)

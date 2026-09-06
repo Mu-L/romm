@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, TypedDict
 
 from sqlalchemy import (
     TIMESTAMP,
@@ -164,7 +164,31 @@ class DocSource(enum.StrEnum):
     SCRAPER = "scraper"  # Downloaded by a metadata provider
 
 
+# Provider ids that name a game rather than a file, so two ROMs sharing any of
+# them are one title (regions, revisions, storefront copies). This is what the
+# `sibling_roms` view below matches on, plus `steam_id`, which postdates it.
+# Add a provider here and to the view together, or the two notions of "same
+# game" drift apart.
+IDENTITY_ID_FIELDS: Final[tuple[str, ...]] = (
+    "igdb_id",
+    "moby_id",
+    "ss_id",
+    "launchbox_id",
+    "ra_id",
+    "hasheous_id",
+    "tgdb_id",
+    "steam_id",
+)
+
+
 class SiblingRom(BaseModel):
+    """Other files of the same game on the same platform.
+
+    A database view, not a table: the match runs over `IDENTITY_ID_FIELDS`.
+    Platform-scoped, unlike the recommendation engine's duplicate suppression,
+    which has to catch the same game released on different hardware too.
+    """
+
     __tablename__ = "sibling_roms"
 
     rom_id: Mapped[int] = mapped_column(Integer, primary_key=True)

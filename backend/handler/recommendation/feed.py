@@ -16,7 +16,8 @@ from typing import Any, Final
 
 from handler.database import db_recommendation_handler, db_rom_handler
 from handler.database.recommendations_handler import UserAffinityRow
-from handler.recommendation.diversity import cap_by_series
+from handler.recommendation.diversity import OVERFETCH_FACTOR, cap_by_series
+from handler.recommendation.scoring import Facet
 from handler.redis_handler import sync_cache
 from logger.logger import log
 from models.rom import Rom, RomUserStatus
@@ -57,9 +58,6 @@ MAX_PER_PLATFORM: Final = 4
 
 # Seeds are read in descending affinity; beyond this the contribution is noise.
 MAX_SEEDS: Final = 60
-
-# How many candidates to hydrate before diversifying down to the final count.
-OVERFETCH_FACTOR: Final = 5
 
 FEED_CACHE_TTL_SECONDS: Final = 900
 FEED_CACHE_PREFIX: Final = "recommendations:feed"
@@ -280,7 +278,7 @@ class FeedBuilder:
             RecommendedRom(
                 rom=roms[rom_id],
                 score=0.0,
-                reasons=[{"facet": "top_rated", "value": ""}],
+                reasons=[{"facet": Facet.TOP_RATED, "value": ""}],
             )
             for rom_id in rom_ids
             if rom_id in roms

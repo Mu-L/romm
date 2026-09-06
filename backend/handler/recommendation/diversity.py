@@ -22,6 +22,11 @@ from models.rom import Rom
 # one: past the franchise, scores fall off a cliff.
 MAX_PER_SERIES: Final = 3
 
+# Entries to rank per entry returned. The caps below drop candidates, and a
+# shelf sitting deep in one franchise drops a lot of them, so every caller
+# ranks deeper than it intends to show.
+OVERFETCH_FACTOR: Final = 5
+
 T = TypeVar("T")
 
 

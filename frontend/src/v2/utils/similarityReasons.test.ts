@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { SimilarityReasonSchema } from "@/__generated__";
+import type { Facet, SimilarityReasonSchema } from "@/__generated__";
 import { reasonIcon, reasonLabel } from "@/v2/utils/similarityReasons";
 
-function reason(facet: string, value = "x"): SimilarityReasonSchema {
-  return { facet, value } as SimilarityReasonSchema;
+function reason(facet: Facet, value = "x"): SimilarityReasonSchema {
+  return { facet, value };
 }
 
-const DEFAULT_ICON = "mdi-tag-outline";
-
 describe("reasonIcon", () => {
+  // There is no fallback to test: FACET_ICONS is keyed by the generated
+  // `Facet` union, so an unmapped facet fails the typecheck rather than
+  // silently rendering a generic tag.
   it.each([
     "collection",
     "franchise",
@@ -24,12 +25,8 @@ describe("reasonIcon", () => {
     "decade",
     "igdb",
     "top_rated",
-  ])("maps %s to a dedicated icon", (facet) => {
-    expect(reasonIcon(reason(facet))).not.toBe(DEFAULT_ICON);
-  });
-
-  it("falls back for a facet it does not know", () => {
-    expect(reasonIcon(reason("something_new"))).toBe(DEFAULT_ICON);
+  ] satisfies Facet[])("maps %s to an icon", (facet) => {
+    expect(reasonIcon(reason(facet))).toMatch(/^mdi-/);
   });
 });
 

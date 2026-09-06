@@ -3,6 +3,7 @@ import pytest
 from handler.recommendation.scoring import (
     FACET_WEIGHTS,
     MAX_QUALITY_BONUS,
+    Facet,
     RomFeatures,
     blend,
     build_inverted_index,
@@ -39,13 +40,13 @@ def test_extract_tokens_namespaces_every_facet():
         first_release_date=SUPER_NES_ERA_EPOCH,
     )
 
-    assert make_token("genre", "Platform") in tokens
-    assert make_token("franchise", "Metroid") in tokens
-    assert make_token("collection", "Super Metroid") in tokens
-    assert make_token("company", "Nintendo") in tokens
-    assert make_token("game_mode", "Single player") in tokens
-    assert make_token("platform", "7") in tokens
-    assert make_token("decade", "1990") in tokens
+    assert make_token(Facet.GENRE, "Platform") in tokens
+    assert make_token(Facet.FRANCHISE, "Metroid") in tokens
+    assert make_token(Facet.COLLECTION, "Super Metroid") in tokens
+    assert make_token(Facet.COMPANY, "Nintendo") in tokens
+    assert make_token(Facet.GAME_MODE, "Single player") in tokens
+    assert make_token(Facet.PLATFORM, "7") in tokens
+    assert make_token(Facet.DECADE, "1990") in tokens
 
 
 def test_extract_tokens_namespaces_the_igdb_tag_facets():
@@ -57,9 +58,9 @@ def test_extract_tokens_namespaces_the_igdb_tag_facets():
         player_perspectives=["Side view"],
     )
 
-    assert make_token("keyword", "metroidvania") in tokens
-    assert make_token("theme", "Horror") in tokens
-    assert make_token("perspective", "Side view") in tokens
+    assert make_token(Facet.KEYWORD, "metroidvania") in tokens
+    assert make_token(Facet.THEME, "Horror") in tokens
+    assert make_token(Facet.PERSPECTIVE, "Side view") in tokens
 
 
 def test_igdb_tags_count_as_a_taste_signal():
@@ -107,8 +108,8 @@ def test_role_split_companies_replace_the_merged_list():
         publishers=["Playtronic"],
     )
 
-    assert make_token("developer", "Nintendo R&D1") in tokens
-    assert make_token("publisher", "Playtronic") in tokens
+    assert make_token(Facet.DEVELOPER, "Nintendo R&D1") in tokens
+    assert make_token(Facet.PUBLISHER, "Playtronic") in tokens
     assert not any(token_facet(token) == "company" for token in tokens)
 
 
@@ -119,7 +120,7 @@ def test_the_merged_company_list_is_the_fallback_without_roles():
         platform_id=1, genres=["Platform"], companies=["Some Studio"]
     )
 
-    assert make_token("company", "Some Studio") in tokens
+    assert make_token(Facet.COMPANY, "Some Studio") in tokens
     assert not any(token_facet(token) == "developer" for token in tokens)
 
 
@@ -160,7 +161,7 @@ def test_extract_tokens_skips_blanks_and_deduplicates():
         franchises=None,
     )
 
-    assert tokens.count(make_token("genre", "Action")) == 1
+    assert tokens.count(make_token(Facet.GENRE, "Action")) == 1
     assert not any(token.endswith(":") for token in tokens)
 
 

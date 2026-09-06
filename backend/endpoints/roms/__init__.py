@@ -60,7 +60,6 @@ from handler.auth.dependencies import (
 from handler.database import (
     db_collection_handler,
     db_platform_handler,
-    db_recommendation_handler,
     db_rom_handler,
     db_save_handler,
 )
@@ -85,7 +84,7 @@ from handler.metadata import (
 )
 from handler.metadata.launchbox_handler.media import populate_rom_specific_paths
 from handler.metadata.ss_handler import add_ss_auth_to_url, get_preferred_media_types
-from handler.recommendation import cap_by_series
+from handler.recommendation import similar_roms
 from handler.rom_conversion import promote_single_file_to_folder
 from handler.scan_handler import (
     MetadataSource,
@@ -1428,36 +1427,13 @@ def get_similar_roms(
 
     assert_rom_visible(request, rom)
 
-    perms = get_permissions(request)
-    # Over-fetch: permission filtering and the per-series cap below both drop
-    # entries, and a shelf deep in one franchise drops a lot of them.
-    edges = db_recommendation_handler.get_similar_rom_edges(id, limit=limit * 4)
-
-    similar_roms = {
-        similar.id: similar
-        for similar in db_rom_handler.get_roms_simple_by_ids(
-            [edge.rom_id for edge in edges]
-        )
-        if not similar.missing_from_fs
-        and perms.can_see_rom(similar.id, similar.platform_id)
-    }
-
-    # Without the cap this section is just the franchise the user is already
-    # looking at -- five Metroid games for Super Metroid, which a franchise
-    # filter already gives them.
-    selected = cap_by_series(
-        edges, lambda edge: similar_roms.get(edge.rom_id), limit=limit
-    )
-
     return [
         SimilarRomSchema(
-            rom=SimpleRomSchema.from_orm_with_request(
-                similar_roms[edge.rom_id], request
-            ),
-            score=edge.score,
-            reasons=edge.reasons,  # type: ignore[arg-type]
+            rom=SimpleRomSchema.from_orm_with_request(item.rom, request),
+            score=item.score,
+            reasons=item.reasons,  # type: ignore[arg-type]
         )
-        for edge in selected
+        for item in similar_roms(id, limit=limit, permissions=get_permissions(request))
     ]
 
 

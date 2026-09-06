@@ -19,6 +19,7 @@ from handler.database.recommendations_handler import RomFeatureRow
 from logger.logger import log
 
 from .scoring import (
+    Facet,
     RomFeatures,
     blend,
     build_inverted_index,
@@ -30,6 +31,7 @@ from .scoring import (
     has_taste_signal,
     normalise_co_occurrence,
     shared_reasons,
+    token_facet,
 )
 
 # Identity of a ROM no identity provider matched: nothing to collide on.
@@ -52,9 +54,20 @@ BUILD_BATCH_SIZE: Final = 500
 # left to promote.
 MAX_STORED_PER_SERIES: Final = 6
 
-# Hard ceiling on candidates scored per ROM. Reached only by games whose every
-# facet is rare, where the tail is noise anyway.
-MAX_CANDIDATES_PER_ROM: Final = 1_500
+# Neighbours held per ROM while the sweep runs. A pair is scored from its
+# lower id, so every ROM needs somewhere to collect the edges other ROMs find
+# for it, and that buffer is live until the sweep reaches it. Deep enough that
+# the identity, title and series filters below can still fill MAX_NEIGHBOURS,
+# shallow enough that a 50k library does not spend hundreds of MB holding it.
+MAX_BUFFERED_NEIGHBOURS: Final = 64
+
+
+def _offer(buffer: list[tuple[float, int]], score: float, rom_id: int) -> None:
+    """Keep the best MAX_BUFFERED_NEIGHBOURS offers in a min-heap."""
+    if len(buffer) < MAX_BUFFERED_NEIGHBOURS:
+        heapq.heappush(buffer, (score, rom_id))
+    elif score > buffer[0][0]:
+        heapq.heapreplace(buffer, (score, rom_id))
 
 
 @dataclass
@@ -99,7 +112,7 @@ def _series_tokens(feature: RomFeatures) -> set[str]:
     cap uses every value: a game listing both "Madden" and "NFL" would
     otherwise be reserved against whichever happened to come first.
     """
-    return {token for token in feature.tokens if token.startswith("franchise:")}
+    return {token for token in feature.tokens if token_facet(token) == Facet.FRANCHISE}
 
 
 def _pair_key(left: int, right: int) -> tuple[int, int]:
@@ -289,15 +302,31 @@ class SimilarityBuilder:
         batch_rom_ids: list[int] = []
         batch_edges: list[dict[str, Any]] = []
 
-        for rom_id, feature in features.items():
-            edges = self._score_one(
-                feature,
+        # Ascending id order is what makes the single-scoring below complete:
+        # once a ROM has been swept, every pair it belongs to has been scored
+        # (those with a lower id when *that* ROM was swept, the rest just now),
+        # so its buffer is final and can be selected from and freed.
+        buffers: defaultdict[int, list[tuple[float, int]]] = defaultdict(list)
+
+        for rom_id in sorted(features):
+            self._score_forward(
+                features[rom_id],
                 features,
                 vectors,
                 postings,
                 signals,
                 identities,
                 total_documents,
+                buffers,
+            )
+
+            edges = self._select_edges(
+                features[rom_id],
+                buffers.pop(rom_id, []),
+                features,
+                vectors,
+                signals,
+                identities,
             )
 
             batch_rom_ids.append(rom_id)
@@ -310,7 +339,7 @@ class SimilarityBuilder:
 
         self._flush(batch_rom_ids, batch_edges)
 
-    def _score_one(
+    def _score_forward(
         self,
         feature: RomFeatures,
         features: dict[int, RomFeatures],
@@ -319,7 +348,14 @@ class SimilarityBuilder:
         signals: _PairSignals,
         identities: Mapping[int, frozenset[str]],
         total_documents: int,
-    ) -> list[dict[str, Any]]:
+        buffers: defaultdict[int, list[tuple[float, int]]],
+    ) -> None:
+        """Score this ROM against the candidates above it, in both directions.
+
+        Candidate generation is symmetric -- two ROMs sharing a token each find
+        the other -- so scoring only from the lower id halves the dot products,
+        which dominate the build.
+        """
         rom_id = feature.rom_id
         source_vector = vectors.get(rom_id, {})
 
@@ -327,52 +363,58 @@ class SimilarityBuilder:
         # A game IGDB relates to, or that users play alongside this one, is
         # worth scoring even when they share no metadata facet at all.
         candidates |= signals.partners_of(rom_id)
-        candidates.discard(rom_id)
 
-        contents = {
-            candidate_id: content_similarity(
-                source_vector, vectors.get(candidate_id, {})
-            )
-            for candidate_id in candidates
-        }
-        if len(contents) > MAX_CANDIDATES_PER_ROM:
-            contents = dict(
-                heapq.nlargest(
-                    MAX_CANDIDATES_PER_ROM,
-                    contents.items(),
-                    key=lambda item: (item[1], item[0]),
-                )
-            )
-
-        scored: list[tuple[float, int]] = []
-        for candidate_id, content in contents.items():
+        for candidate_id in candidates:
+            if candidate_id <= rom_id:
+                continue
             if self._is_duplicate(rom_id, candidate_id, identities):
                 continue
 
+            content = content_similarity(source_vector, vectors.get(candidate_id, {}))
             key = _pair_key(rom_id, candidate_id)
-            score = blend(
-                content=content,
-                igdb_prior=signals.igdb.get(key, 0.0),
-                co_play=signals.co_play.get(key, 0.0),
-                co_collection=signals.co_collection.get(key, 0.0),
-                average_rating=features[candidate_id].average_rating,
-            )
+            igdb_prior = signals.igdb.get(key, 0.0)
+            co_play = signals.co_play.get(key, 0.0)
+            co_collection = signals.co_collection.get(key, 0.0)
 
-            if score >= MIN_EDGE_SCORE:
-                scored.append((score, candidate_id))
+            # Only the target's quality bonus differs by direction, so the pair
+            # is blended twice off the one content score.
+            for source, target in ((rom_id, candidate_id), (candidate_id, rom_id)):
+                score = blend(
+                    content=content,
+                    igdb_prior=igdb_prior,
+                    co_play=co_play,
+                    co_collection=co_collection,
+                    average_rating=features[target].average_rating,
+                )
+                if score >= MIN_EDGE_SCORE:
+                    _offer(buffers[source], score, target)
 
-        scored.sort(key=lambda item: (-item[0], item[1]))
+    def _select_edges(
+        self,
+        feature: RomFeatures,
+        buffered: list[tuple[float, int]],
+        features: dict[int, RomFeatures],
+        vectors: dict[int, dict[str, float]],
+        signals: _PairSignals,
+        identities: Mapping[int, frozenset[str]],
+    ) -> list[dict[str, Any]]:
+        """Take the best buffered neighbours, dropping ones that duplicate each other.
 
-        # Second pass, over the ranked list: drop neighbours that duplicate the
-        # source or each other. The per-candidate check above compares against
-        # the source alone, so two discs of one release would each take a slot.
+        The pair-level check compares a candidate against the source alone, so
+        without this two discs of one release would each take a slot.
+        """
+        rom_id = feature.rom_id
+        source_vector = vectors.get(rom_id, {})
+
         edges: list[dict[str, Any]] = []
         taken_identities: set[str] = set()
         taken_titles: set[str] = set()
         series_counts: dict[str, int] = {}
         source_title = feature.title_key
 
-        for score, candidate_id in scored:
+        for score, candidate_id in sorted(
+            buffered, key=lambda item: (-item[0], item[1])
+        ):
             candidate_identity = identities.get(candidate_id, _NO_IDENTITY)
             if not candidate_identity.isdisjoint(taken_identities):
                 continue
@@ -398,7 +440,7 @@ class SimilarityBuilder:
 
             reasons = shared_reasons(source_vector, vectors.get(candidate_id, {}))
             if _pair_key(rom_id, candidate_id) in signals.igdb:
-                reasons.append({"facet": "igdb", "value": "similar"})
+                reasons.append({"facet": Facet.IGDB, "value": "similar"})
 
             edges.append(
                 {

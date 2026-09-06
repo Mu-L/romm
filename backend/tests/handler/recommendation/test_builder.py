@@ -12,7 +12,7 @@ from handler.database import (
     db_recommendation_handler,
     db_rom_handler,
 )
-from handler.recommendation import SimilarityBuilder
+from handler.recommendation import SimilarityBuilder, builder
 from models.platform import Platform
 from models.rom import Rom
 
@@ -23,6 +23,7 @@ def make_rom(
     *,
     igdb_id: int | None = None,
     steam_id: int | None = None,
+    moby_id: int | None = None,
     genres: list[str] | None = None,
     franchises: list[str] | None = None,
     collections: list[str] | None = None,
@@ -69,6 +70,7 @@ def make_rom(
             fs_path=f"{platform.slug}/roms",
             igdb_id=igdb_id,
             steam_id=steam_id,
+            moby_id=moby_id,
             igdb_metadata=metadata,
         )
     )
@@ -436,3 +438,56 @@ def test_cold_start_still_returns_games_with_no_vote_count(platform: Platform):
     )
 
     assert unvoted.id in db_recommendation_handler.get_fallback_rom_ids(limit=25)
+
+
+def test_edges_are_written_for_both_directions_of_a_pair(library: dict[str, Rom]):
+    """Each pair is scored once, from its lower id, but stores both edges."""
+    SimilarityBuilder().build()
+
+    forward = db_recommendation_handler.get_similar_rom_edges(library["metroid"].id)
+    backward = db_recommendation_handler.get_similar_rom_edges(library["metroid_2"].id)
+
+    assert library["metroid_2"].id in {edge.rom_id for edge in forward}
+    assert library["metroid"].id in {edge.rom_id for edge in backward}
+
+
+def test_buffer_keeps_only_the_strongest_offers():
+    buffer: list[tuple[float, int]] = []
+    for rom_id in range(builder.MAX_BUFFERED_NEIGHBOURS + 20):
+        builder._offer(buffer, rom_id / 100, rom_id)
+
+    assert len(buffer) == builder.MAX_BUFFERED_NEIGHBOURS
+    # The 20 weakest offers were displaced, not the 20 most recent.
+    assert min(rom_id for _, rom_id in buffer) == 20
+
+
+def test_a_duplicate_matched_only_by_mobygames_is_suppressed(
+    platform: Platform, library: dict[str, Rom]
+):
+    """Identity is the list `sibling_roms` matches on, not just IGDB and Steam."""
+    original = make_rom(
+        platform, "Shinobi", moby_id=5100, genres=["Action"], franchises=["Shinobi"]
+    )
+    reissue = make_rom(
+        platform,
+        "Shinobi (Rev 1)",
+        moby_id=5100,
+        genres=["Action"],
+        franchises=["Shinobi"],
+    )
+    sequel = make_rom(
+        platform,
+        "Shinobi III",
+        igdb_id=5101,
+        genres=["Action"],
+        franchises=["Shinobi"],
+    )
+
+    SimilarityBuilder().build()
+
+    neighbours = {
+        edge.rom_id
+        for edge in db_recommendation_handler.get_similar_rom_edges(original.id)
+    }
+    assert reissue.id not in neighbours
+    assert sequel.id in neighbours
