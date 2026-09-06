@@ -19,6 +19,10 @@ Cross-engine notes:
 - PostgreSQL ``to_timestamp(text, text)`` is ``STABLE`` and so illegal in a
   generated column; the gamelist date is parsed through an ``IMMUTABLE`` UTC
   wrapper function instead.
+- MariaDB pins ``JSON_TYPE`` to ``utf8mb3_general_ci`` while a literal in a
+  generated-column expression inherits the table's collation, so the two are an
+  illegal mix on a non-``general_ci`` table; ``CAST(... AS CHAR)`` re-derives the
+  collation from the surrounding context.
 
 Revision ID: 0098_generated_metadata_columns
 Revises: 0097_roms_platform_fs_size_index
@@ -200,14 +204,14 @@ _MARIA_AGE_RATINGS = """COALESCE(
     CASE WHEN JSON_CONTAINS_PATH(igdb_metadata, 'one', '$.age_ratings')
         AND JSON_LENGTH(JSON_EXTRACT(igdb_metadata, '$.age_ratings')) > 0
         THEN IF(
-            JSON_TYPE(JSON_EXTRACT(igdb_metadata, '$.age_ratings[*].rating')) = 'ARRAY',
+            CAST(JSON_TYPE(JSON_EXTRACT(igdb_metadata, '$.age_ratings[*].rating')) AS CHAR) = 'ARRAY',
             JSON_EXTRACT(igdb_metadata, '$.age_ratings[*].rating'),
             JSON_ARRAY(JSON_UNQUOTE(JSON_EXTRACT(igdb_metadata, '$.age_ratings[*].rating')))
         ) ELSE NULL END,
     CASE WHEN JSON_CONTAINS_PATH(ss_metadata, 'one', '$.age_ratings')
         AND JSON_LENGTH(JSON_EXTRACT(ss_metadata, '$.age_ratings')) > 0
         THEN IF(
-            JSON_TYPE(JSON_EXTRACT(ss_metadata, '$.age_ratings[*].rating')) = 'ARRAY',
+            CAST(JSON_TYPE(JSON_EXTRACT(ss_metadata, '$.age_ratings[*].rating')) AS CHAR) = 'ARRAY',
             JSON_EXTRACT(ss_metadata, '$.age_ratings[*].rating'),
             JSON_ARRAY(JSON_UNQUOTE(JSON_EXTRACT(ss_metadata, '$.age_ratings[*].rating')))
         ) ELSE NULL END,
@@ -715,7 +719,7 @@ CREATE OR REPLACE VIEW roms_metadata AS
                 WHEN JSON_CONTAINS_PATH(r.igdb_metadata, 'one', '$.age_ratings')
                     AND JSON_LENGTH(JSON_EXTRACT(r.igdb_metadata, '$.age_ratings')) > 0
                 THEN IF(
-                        JSON_TYPE(JSON_EXTRACT(r.igdb_metadata, '$.age_ratings[*].rating')) = 'ARRAY',
+                        CAST(JSON_TYPE(JSON_EXTRACT(r.igdb_metadata, '$.age_ratings[*].rating')) AS CHAR) = 'ARRAY',
                         JSON_EXTRACT(r.igdb_metadata, '$.age_ratings[*].rating'),
                         JSON_ARRAY(JSON_UNQUOTE(JSON_EXTRACT(r.igdb_metadata, '$.age_ratings[*].rating')))
                     )
@@ -725,7 +729,7 @@ CREATE OR REPLACE VIEW roms_metadata AS
                 WHEN JSON_CONTAINS_PATH(r.ss_metadata, 'one', '$.age_ratings')
                     AND JSON_LENGTH(JSON_EXTRACT(r.ss_metadata, '$.age_ratings')) > 0
                 THEN IF(
-                        JSON_TYPE(JSON_EXTRACT(r.ss_metadata, '$.age_ratings[*].rating')) = 'ARRAY',
+                        CAST(JSON_TYPE(JSON_EXTRACT(r.ss_metadata, '$.age_ratings[*].rating')) AS CHAR) = 'ARRAY',
                         JSON_EXTRACT(r.ss_metadata, '$.age_ratings[*].rating'),
                         JSON_ARRAY(JSON_UNQUOTE(JSON_EXTRACT(r.ss_metadata, '$.age_ratings[*].rating')))
                     )
