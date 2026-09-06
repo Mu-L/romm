@@ -10,6 +10,8 @@
 // Genre/franchise belong in the Overview tab info grid.
 import { RIcon, RPlatformIcon, RTag, RTooltip } from "@v2/lib";
 import { useI18n } from "vue-i18n";
+import { ROUTES } from "@/plugins/router";
+import type { FilterType } from "@/stores/galleryFilter";
 import type { DetailedRom } from "@/stores/roms";
 import GameActions from "@/v2/components/GameActions/GameActions.vue";
 import MainSiblingToggle from "@/v2/components/GameDetails/MainSiblingToggle.vue";
@@ -33,6 +35,13 @@ const props = defineProps<{
 }>();
 
 const actions = useGameActions(() => props.rom);
+
+// Same pivot-to-search the Overview info grid offers on genres/companies:
+// a link (not a click handler) so middle-click and open-in-new-tab work.
+const searchLocation = (filter: FilterType, item: string) => ({
+  name: ROUTES.SEARCH,
+  query: { [filter]: item },
+});
 </script>
 
 <template>
@@ -92,21 +101,30 @@ const actions = useGameActions(() => props.rom);
         v-if="regions.length || languages.length || tags.length"
         class="r-v2-det-header__tags"
       >
-        <RTag
+        <router-link
           v-for="r in regions"
           :key="`r-${r}`"
-          :text="r"
-          tone="info"
-          size="small"
-        />
-        <RTag
+          :to="searchLocation('regions', r)"
+          class="r-v2-det-header__tag-link"
+        >
+          <RTag :text="r" tone="info" size="small" />
+        </router-link>
+        <router-link
           v-for="l in languages"
           :key="`l-${l}`"
-          :text="l"
-          tone="brand"
-          size="small"
-        />
-        <RTag v-for="t in tags" :key="`t-${t}`" :text="t" size="small" />
+          :to="searchLocation('languages', l)"
+          class="r-v2-det-header__tag-link"
+        >
+          <RTag :text="l" tone="brand" size="small" />
+        </router-link>
+        <router-link
+          v-for="tag in tags"
+          :key="`t-${tag}`"
+          :to="searchLocation('tags', tag)"
+          class="r-v2-det-header__tag-link"
+        >
+          <RTag :text="tag" size="small" />
+        </router-link>
       </span>
     </div>
 
@@ -181,6 +199,16 @@ const actions = useGameActions(() => props.rom);
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.r-v2-det-header__tag-link {
+  display: inline-flex;
+  text-decoration: none;
+  border-radius: var(--r-radius-chip);
+}
+/* Strengthen the border in the tag's own tone so the affordance reads the
+   same for region / language / custom tags. */
+.r-v2-det-header__tag-link:hover :deep(.r-tag) {
+  --r-tag-border: var(--r-tag-fg);
 }
 
 .r-v2-det-header__versions {
