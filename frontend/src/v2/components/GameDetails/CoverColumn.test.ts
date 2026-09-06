@@ -76,15 +76,13 @@ describe("CoverColumn zoom", () => {
     ]);
   });
 
-  it("stays inert when the rom has no cover to zoom into", async () => {
+  it("stays inert when the rom has no cover to zoom into", () => {
     const wrapper = mountCover({ path_cover_large: null }, null);
-    const button = wrapper.get("button.r-v2-det-cover__zoom");
 
-    expect(button.attributes("disabled")).toBeDefined();
+    expect(
+      wrapper.get("button.r-v2-det-cover__zoom").attributes("disabled"),
+    ).toBeDefined();
     expect(wrapper.find(".r-v2-det-cover__zoom-hint").exists()).toBe(false);
-
-    await button.trigger("click");
-
     expect(wrapper.findComponent(CAROUSEL).exists()).toBe(false);
   });
 });

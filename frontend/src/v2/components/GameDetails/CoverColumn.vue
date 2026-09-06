@@ -49,7 +49,7 @@ const art = useCoverArt(() => props.rom, { context: () => "details" });
 const cover = useTemplateRef("cover");
 const zoomSrc = ref<string | null>(null);
 
-// Ask the cover what it is rendering rather than re-resolving it here — it
+// Ask the cover what it is rendering rather than re-resolving it here: it
 // swaps to the external fallback when the primary image fails.
 function openZoom() {
   zoomSrc.value = cover.value?.renderedSrc ?? null;
@@ -152,7 +152,7 @@ function openZoom() {
 .r-v2-det-cover__zoom:focus-visible .r-v2-det-cover__zoom-hint {
   opacity: 1;
 }
-/* No hover on touch / gamepad — keep the affordance visible there. */
+/* No hover on touch / gamepad, so keep the affordance visible there. */
 html[data-input="touch"] .r-v2-det-cover__zoom-hint,
 html[data-input="pad"] .r-v2-det-cover__zoom-hint {
   opacity: 1;

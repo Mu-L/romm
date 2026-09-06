@@ -220,7 +220,7 @@ function onBackdropClick(event: MouseEvent) {
 
       <!-- Stage: holds the transitioning active item, vertically + horizontally
            centred. The .self clicks dismiss on the backdrop area around the
-           image — outside-click on the outer wrapper alone would miss those
+           image; outside-click on the outer wrapper alone would miss those
            gaps because they're nested inside the stage. The item box fills
            the stage while the image only letterboxes inside it, so the item
            needs its own handler or most of the visible backdrop stays dead. -->
