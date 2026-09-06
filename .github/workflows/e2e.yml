@@ -9,6 +9,7 @@ on:
       - ".github/scripts/**"
       - pyproject.toml
       - uv.lock
+      - .python-version
   push:
     branches:
       - "master"
@@ -19,6 +20,7 @@ on:
       - ".github/scripts/**"
       - pyproject.toml
       - uv.lock
+      - .python-version
 
 permissions: read-all
 
@@ -27,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mariadb:
-        image: mariadb:10.11
+        image: mariadb:11.3.2
         ports:
           - 3306
         env:
@@ -35,7 +37,7 @@ jobs:
           MYSQL_PASSWORD: passwd
           MYSQL_DATABASE: romm_e2e
           MYSQL_ROOT_PASSWORD: passwd
-        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-timeout=2s --health-retries=3
       valkey:
         image: valkey/valkey:7.2
         ports:
@@ -69,7 +71,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Install python
-        run: uv python install 3.13
+        run: uv python install
 
       # pyproject.toml lives at the repo root, so sync from there
       - name: Install backend dependencies
