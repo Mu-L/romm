@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import TypedDict
 from unittest.mock import MagicMock
 
@@ -498,11 +499,17 @@ class TestExportToFile:
     def test_media_keys_resolve_to_esde_dirs(self):
         assert set(PEGASUS_MEDIA_KEYS.values()) <= set(PLATFORM_MEDIA_DIRS)
 
-    async def test_media_shares_esde_dirs(
-        self, admin_user: User, tmp_path, monkeypatch
-    ):
-        """Media lands in the same per-type folders the gamelist export uses, so
-        exporting for both frontends yields one copy and no assets/ tree."""
+    @staticmethod
+    async def _export(
+        admin_user: User,
+        tmp_path: Path,
+        monkeypatch,
+        rom_fields: dict[str, object],
+        sources: dict[str, bytes],
+    ) -> tuple[Path, str]:
+        """Export one SNES ROM with ``rom_fields`` applied and ``sources``
+        present under the resources base. Returns the platform dir and the
+        written metadata.pegasus.txt."""
         resources_base = tmp_path / "resources"
         library_base = tmp_path / "library"
         monkeypatch.setattr(fs_resource_handler, "base_path", resources_base)
@@ -524,8 +531,29 @@ class TestExportToFile:
             )
         )
         db_rom_handler.add_rom_user(rom_id=rom.id, user_id=admin_user.id)
-        db_rom_handler.update_rom(
-            rom.id,
+        db_rom_handler.update_rom(rom.id, rom_fields)
+        for rel, content in sources.items():
+            src = resources_base / rel
+            src.parent.mkdir(parents=True, exist_ok=True)
+            src.write_bytes(content)
+
+        exporter = PegasusExporter(local_export=True)
+        assert await exporter.export_platform_to_file(platform.id, request=None)
+
+        platform_dir = library_base / fs_platform_handler.get_platform_fs_structure(
+            platform.fs_slug
+        )
+        return platform_dir, (platform_dir / "metadata.pegasus.txt").read_text()
+
+    async def test_media_shares_esde_dirs(
+        self, admin_user: User, tmp_path, monkeypatch
+    ):
+        """Media lands in the same per-type folders the gamelist export uses, so
+        exporting for both frontends yields one copy and no assets/ tree."""
+        platform_dir, content = await self._export(
+            admin_user,
+            tmp_path,
+            monkeypatch,
             {
                 "path_cover_l": "snes/covers/smw.jpg",
                 "path_screenshots": ["snes/screenshots/smw-1.jpg"],
@@ -535,24 +563,18 @@ class TestExportToFile:
                     "fanart_path": "snes-ss/fanart/smw.jpg",
                 },
             },
+            {
+                rel: b"x"
+                for rel in (
+                    "snes/covers/smw.jpg",
+                    "snes/screenshots/smw-1.jpg",
+                    "snes-ss/logo/smw.png",
+                    "snes-ss/physical/smw.png",
+                    "snes-ss/fanart/smw.jpg",
+                )
+            },
         )
-        for rel in (
-            "snes/covers/smw.jpg",
-            "snes/screenshots/smw-1.jpg",
-            "snes-ss/logo/smw.png",
-            "snes-ss/physical/smw.png",
-            "snes-ss/fanart/smw.jpg",
-        ):
-            src = resources_base / rel
-            src.parent.mkdir(parents=True, exist_ok=True)
-            src.write_bytes(b"x")
 
-        exporter = PegasusExporter(local_export=True)
-        assert await exporter.export_platform_to_file(platform.id, request=None)
-
-        platform_dir = library_base / fs_platform_handler.get_platform_fs_structure(
-            platform.fs_slug
-        )
         expected = {
             "box_front": "covers/Super Mario World (USA).jpg",
             "screenshot": "screenshots/Super Mario World (USA).jpg",
@@ -564,10 +586,35 @@ class TestExportToFile:
             assert (platform_dir / rel).is_file(), f"missing media {rel}"
         assert not (platform_dir / "assets").exists()
 
-        content = (platform_dir / "metadata.pegasus.txt").read_text()
         for key, rel in expected.items():
             assert f"assets.{key}: {rel}" in content
 
         written_dirs = [p.name for p in platform_dir.iterdir() if p.is_dir()]
         assert written_dirs
         assert fs_rom_handler.exclude_multi_roms(written_dirs) == []
+
+    async def test_logo_and_marquee_both_survive(
+        self, admin_user: User, tmp_path, monkeypatch
+    ):
+        """Both map to marquees/; the second gets its own filename instead of
+        being dropped or pointed at the first."""
+        platform_dir, content = await self._export(
+            admin_user,
+            tmp_path,
+            monkeypatch,
+            {
+                "ss_metadata": {"logo_path": "snes-ss/logo/smw.png"},
+                "gamelist_metadata": {"marquee_path": "snes-gl/marquee/smw.png"},
+            },
+            {
+                "snes-ss/logo/smw.png": b"logo",
+                "snes-gl/marquee/smw.png": b"marquee",
+            },
+        )
+
+        logo = platform_dir / "marquees/Super Mario World (USA).png"
+        marquee = platform_dir / "marquees/Super Mario World (USA)-marquee.png"
+        assert logo.read_bytes() == b"logo"
+        assert marquee.read_bytes() == b"marquee"
+        assert "assets.logo: marquees/Super Mario World (USA).png" in content
+        assert "assets.marquee: marquees/Super Mario World (USA)-marquee.png" in content

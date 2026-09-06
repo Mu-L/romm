@@ -399,10 +399,19 @@ class PegasusExporter:
                 if self.local_export:
                     assets = self._collect_assets(rom)
 
+                    claimed: dict[Path, Path] = {}
                     for asset_key, source_path in assets.items():
                         subdir = PLATFORM_MEDIA_DIRS[PEGASUS_MEDIA_KEYS[asset_key]]
                         dest_name = f"{rom.fs_name_no_ext}{source_path.suffix}"
                         dest_path = platform_dir / subdir / dest_name
+
+                        # Logo and marquee share one folder; keep both files.
+                        if claimed.get(dest_path, source_path) != source_path:
+                            dest_name = (
+                                f"{rom.fs_name_no_ext}-{asset_key}{source_path.suffix}"
+                            )
+                            dest_path = platform_dir / subdir / dest_name
+                        claimed[dest_path] = source_path
 
                         if self._copy_asset(source_path, dest_path):
                             exported_assets[asset_key] = f"{subdir}/{dest_name}"
