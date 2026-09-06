@@ -1,5 +1,9 @@
 # Please see the full example under examples/docker-compose.example.yml
 
+# Pinned so the default network stays romm_default whatever the checkout
+# directory is named; docker-compose.oidc.yml and .streaming.yml join it.
+name: romm
+
 services:
   romm-dev:
     build:

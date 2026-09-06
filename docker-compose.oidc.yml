@@ -1,13 +1,11 @@
-# Authentik (plus its Postgres) for OIDC development.
-#
-# Kept out of docker-compose.yml because most work needs neither:
+# Authentik (plus its Postgres) for OIDC development, opt-in because most work
+# needs neither:
 #   docker compose -f docker-compose.oidc.yml up -d
 #
-# Joins the romm-dev network so Authentik can reach the dev Valkey by name and
-# the backend can reach the issuer by name, while the browser reaches Authentik
-# on a published port. Set the OIDC_* variables in .env to point RomM at it.
-# Its own compose project, so a `down --remove-orphans` here can never reach
-# the dev stack that shares this directory's default project name.
+# Its own compose project, so a `down --remove-orphans` here can never reach the
+# dev stack. Joins romm_default so Authentik reaches the dev Valkey and the
+# backend reaches the issuer by name, while the browser uses the published port.
+# Point RomM at it with the OIDC_* variables in .env.
 name: romm-oidc
 
 services:
