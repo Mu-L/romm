@@ -1,0 +1,84 @@
+# Authentik (plus its Postgres) for OIDC development.
+#
+# Kept out of docker-compose.yml because most work needs neither:
+#   docker compose -f docker-compose.oidc.yml up -d
+#
+# Joins the romm-dev network so Authentik can reach the dev Valkey by name and
+# the backend can reach the issuer by name, while the browser reaches Authentik
+# on a published port. Set the OIDC_* variables in .env to point RomM at it.
+# Its own compose project, so a `down --remove-orphans` here can never reach
+# the dev stack that shares this directory's default project name.
+name: romm-oidc
+
+services:
+  romm-postgres-dev:
+    image: postgres:16-alpine
+    container_name: romm-postgresql-dev
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authentik}
+      POSTGRES_USER: ${POSTGRES_USER:-romm}
+      POSTGRES_DB: ${POSTGRES_DB:-authentik}
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - romm_default
+
+  romm-authentik-server:
+    image: ghcr.io/goauthentik/server:2024.10.4
+    container_name: romm-authentik-server
+    restart: unless-stopped
+    command: server
+    env_file: .env
+    environment:
+      AUTHENTIK_REDIS__HOST: romm-valkey-dev
+      AUTHENTIK_POSTGRESQL__HOST: romm-postgres-dev
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-romm}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-secret-key-default}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-password}
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    ports:
+      - "9001:9000"
+      - "9444:9443"
+    depends_on:
+      - romm-postgres-dev
+    networks:
+      - romm_default
+
+  romm-authentik-worker:
+    image: ghcr.io/goauthentik/server:2024.10.4
+    container_name: romm-authentik-worker
+    restart: unless-stopped
+    command: worker
+    env_file: .env
+    environment:
+      AUTHENTIK_REDIS__HOST: romm-valkey-dev
+      AUTHENTIK_POSTGRESQL__HOST: romm-postgres-dev
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER:-romm}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD:-authentik}
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-secret-key-default}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-password}
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    depends_on:
+      - romm-postgres-dev
+    networks:
+      - romm_default
+
+volumes:
+  postgres-db:
+  authentik-media:
+  authentik-templates:
+
+networks:
+  romm_default:
+    external: true
