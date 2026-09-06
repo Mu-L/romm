@@ -9,6 +9,7 @@ on:
       - ".github/scripts/**"
       - pyproject.toml
       - uv.lock
+      - .python-version
   push:
     branches:
       - "master"
@@ -19,6 +20,7 @@ on:
       - ".github/scripts/**"
       - pyproject.toml
       - uv.lock
+      - .python-version
 
 permissions: read-all
 
@@ -69,7 +71,7 @@ jobs:
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Install python
-        run: uv python install 3.14
+        run: uv python install
 
       # pyproject.toml lives at the repo root, so sync from there
       - name: Install backend dependencies

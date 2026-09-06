@@ -23,7 +23,7 @@ jobs:
 
       - name: Install python
         run: |
-          uv python install 3.14
+          uv python install
 
       - name: Install dependencies
         run: |
