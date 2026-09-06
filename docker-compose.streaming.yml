@@ -3,8 +3,8 @@
 #   docker compose -f docker-compose.streaming.yml up -d
 #
 # Its own compose project, so a `down --remove-orphans` here can never reach the
-# dev stack. Joins romm_default so the backend can reach the broker by name; see
-# config.yml's `broker_host` (server to server) vs `host` (browser).
+# dev stack. Joins romm_default, so bring the dev stack up first; see config.yml's
+# `broker_host` (server to server) vs `host` (browser) for how it is reached.
 name: romm-streaming
 
 services:

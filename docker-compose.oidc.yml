@@ -3,8 +3,9 @@
 #   docker compose -f docker-compose.oidc.yml up -d
 #
 # Its own compose project, so a `down --remove-orphans` here can never reach the
-# dev stack. Joins romm_default so Authentik reaches the dev Valkey and the
-# backend reaches the issuer by name, while the browser uses the published port.
+# dev stack. Joins romm_default, so bring the dev stack up first: Authentik
+# reaches the dev Valkey and the backend reaches the issuer by name, while the
+# browser uses the published port.
 # Point RomM at it with the OIDC_* variables in .env.
 name: romm-oidc
 
