@@ -253,6 +253,29 @@ class DBRecommendationsHandler(DBBaseHandler):
         return written
 
     @begin_session
+    def get_stored_edges(
+        self,
+        rom_ids: Sequence[int],
+        session: Session = None,  # type: ignore
+    ) -> dict[int, list[tuple[float, int]]]:
+        """Each ROM's current neighbours, for a top-up to merge new ones into.
+
+        Scores only: the reasons are recomputed against the live snapshot, so
+        carrying the stored ones over would only preserve staler wording.
+        """
+        if not rom_ids:
+            return {}
+
+        stmt = select(
+            RomSimilarity.rom_id, RomSimilarity.score, RomSimilarity.related_rom_id
+        ).where(RomSimilarity.rom_id.in_(rom_ids))
+
+        stored: dict[int, list[tuple[float, int]]] = {}
+        for rom_id, score, related_rom_id in session.execute(stmt):
+            stored.setdefault(rom_id, []).append((score, related_rom_id))
+        return stored
+
+    @begin_session
     def count_similarity_edges(self, session: Session = None) -> int:  # type: ignore
         return session.scalar(select(func.count()).select_from(RomSimilarity)) or 0
 

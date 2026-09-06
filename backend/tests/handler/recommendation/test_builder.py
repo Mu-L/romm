@@ -15,6 +15,7 @@ from handler.database import (
     db_rom_handler,
 )
 from handler.recommendation import SimilarityBuilder, builder
+from handler.recommendation.feed import _cache_key
 from models.platform import Platform
 from models.rom import Rom
 from models.user import User
@@ -545,3 +546,176 @@ def test_a_duplicate_matched_only_by_mobygames_is_suppressed(
     }
     assert reissue.id not in neighbours
     assert sequel.id in neighbours
+
+
+class TestTopUp:
+    """Scoring a handful of ROMs against a library that is already indexed."""
+
+    def test_a_new_rom_gets_edges_without_a_rebuild(
+        self, platform: Platform, library: dict[str, Rom]
+    ):
+        SimilarityBuilder().build()
+
+        newcomer = make_rom(
+            platform,
+            "Metroid Prime",
+            igdb_id=1005,
+            genres=["Platform", "Adventure"],
+            franchises=["Metroid"],
+            companies=["Nintendo"],
+        )
+        assert not db_recommendation_handler.get_similar_rom_edges(newcomer.id)
+
+        stats = SimilarityBuilder().build_for([newcomer.id])
+
+        # Only the newcomer is rescored; the rest of the graph is left alone.
+        assert stats.roms_indexed == 1
+        neighbours = {
+            edge.rom_id
+            for edge in db_recommendation_handler.get_similar_rom_edges(newcomer.id)
+        }
+        assert library["metroid"].id in neighbours
+
+    def test_a_new_rom_reaches_the_games_it_matched(
+        self, platform: Platform, library: dict[str, Rom]
+    ):
+        """Without the reverse edge the newcomer stays out of everyone's feed."""
+        SimilarityBuilder().build()
+
+        newcomer = make_rom(
+            platform,
+            "Metroid Prime",
+            igdb_id=1005,
+            genres=["Platform", "Adventure"],
+            franchises=["Metroid"],
+            companies=["Nintendo"],
+        )
+        SimilarityBuilder().build_for([newcomer.id])
+
+        neighbours = {
+            edge.rom_id
+            for edge in db_recommendation_handler.get_similar_rom_edges(
+                library["metroid"].id
+            )
+        }
+        assert newcomer.id in neighbours
+
+    def test_neighbours_keep_the_edges_they_already_had(
+        self, platform: Platform, library: dict[str, Rom]
+    ):
+        SimilarityBuilder().build()
+
+        newcomer = make_rom(
+            platform,
+            "Metroid Prime",
+            igdb_id=1005,
+            genres=["Platform", "Adventure"],
+            franchises=["Metroid"],
+            companies=["Nintendo"],
+        )
+        SimilarityBuilder().build_for([newcomer.id])
+
+        neighbours = {
+            edge.rom_id
+            for edge in db_recommendation_handler.get_similar_rom_edges(
+                library["metroid"].id
+            )
+        }
+        assert library["metroid_2"].id in neighbours
+
+    def test_two_new_roms_do_not_offer_each_other_twice(
+        self, platform: Platform, library: dict[str, Rom]
+    ):
+        """Both directions of a pair of targets are scored once, not once per side."""
+        SimilarityBuilder().build()
+
+        first = make_rom(
+            platform,
+            "Metroid Prime",
+            igdb_id=1005,
+            genres=["Platform", "Adventure"],
+            franchises=["Metroid"],
+            companies=["Nintendo"],
+        )
+        second = make_rom(
+            platform,
+            "Metroid Dread",
+            igdb_id=1006,
+            genres=["Platform", "Adventure"],
+            franchises=["Metroid"],
+            companies=["Nintendo"],
+        )
+
+        SimilarityBuilder().build_for([first.id, second.id])
+
+        for rom in (first, second):
+            related = [
+                edge.rom_id
+                for edge in db_recommendation_handler.get_similar_rom_edges(rom.id)
+            ]
+            assert len(related) == len(set(related))
+
+    def test_a_rom_with_no_taste_signal_is_counted_not_indexed(
+        self, platform: Platform, library: dict[str, Rom]
+    ):
+        SimilarityBuilder().build()
+
+        bare = make_rom(platform, "Unknown Dump")
+
+        stats = SimilarityBuilder().build_for([bare.id])
+
+        assert stats.roms_indexed == 0
+        assert stats.roms_without_metadata == 1
+
+    def test_an_empty_top_up_reads_nothing(self):
+        stats = SimilarityBuilder().build_for([])
+
+        assert stats.total == 0
+        assert stats.edges_written == 0
+
+
+class TestTopUpPolicy:
+    def test_a_scan_that_touched_the_library_defers_to_a_rebuild(self, monkeypatch):
+        enqueued: list[tuple[str, dict]] = []
+        monkeypatch.setattr(builder, "MAX_TOP_UP_ROMS", 2)
+        monkeypatch.setattr(
+            "tasks.registry.enqueue_task",
+            lambda name, **kwargs: enqueued.append((name, kwargs)),
+        )
+        monkeypatch.setattr(
+            builder.SimilarityBuilder,
+            "build_for",
+            lambda self, rom_ids: pytest.fail("should not score inline"),
+        )
+
+        builder.top_up_similarity([1, 2, 3])
+
+        assert enqueued == [("build_recommendations", {"task_kwargs": {"force": True}})]
+
+    def test_nothing_scanned_touches_neither_path(self, monkeypatch):
+        monkeypatch.setattr(
+            builder.SimilarityBuilder,
+            "build_for",
+            lambda self, rom_ids: pytest.fail("should not score inline"),
+        )
+
+        builder.top_up_similarity([])
+
+    def test_a_top_up_that_wrote_edges_drops_the_cached_feeds(
+        self, platform: Platform, library: dict[str, Rom], admin_user: User
+    ):
+        """Every cached ranking was computed against the graph the top-up moved."""
+        SimilarityBuilder().build()
+        newcomer = make_rom(
+            platform,
+            "Metroid Prime",
+            igdb_id=1005,
+            genres=["Platform", "Adventure"],
+            franchises=["Metroid"],
+            companies=["Nintendo"],
+        )
+        stale_key = _cache_key(admin_user.id, 10)
+
+        builder.top_up_similarity([newcomer.id])
+
+        assert _cache_key(admin_user.id, 10) != stale_key

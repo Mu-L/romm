@@ -1,15 +1,16 @@
 """Builds the precomputed item-item similarity graph.
 
-Run from the scheduled recommendations task. The whole graph is derived from
-one consistent snapshot of the library, because the IDF weighting that makes
-scores library-relative changes as the shelf grows.
+Run from the scheduled recommendations task, and incrementally after a scan.
+A full build derives the whole graph from one consistent snapshot of the
+library, because the IDF weighting that makes scores library-relative changes
+as the shelf grows.
 """
 
 from __future__ import annotations
 
 import heapq
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Any, Final
@@ -18,6 +19,7 @@ from handler.database import db_recommendation_handler
 from handler.database.recommendations_handler import RomFeatureRow
 from logger.logger import log
 
+from .feed import invalidate_all_cached_feeds
 from .scoring import (
     Facet,
     RomFeatures,
@@ -58,6 +60,16 @@ MAX_STORED_PER_SERIES: Final = 6
 # that a 50k library does not spend hundreds of MB holding it.
 MAX_BUFFERED_NEIGHBOURS: Final = 64
 
+# ROMs a top-up will score before it defers to a full rebuild instead. Past
+# this the incremental path costs what a rebuild costs, and a rebuild also
+# refreshes the IDF the rest of the graph is scored against.
+MAX_TOP_UP_ROMS: Final = 5_000
+
+# Existing ROMs whose stored neighbour lists a top-up rewrites, strongest new
+# offer first. A game added to a large library brushes against thousands of
+# neighbours but displaces a stored edge in very few of them.
+MAX_TOP_UP_NEIGHBOURS: Final = 2_000
+
 
 def _offer(buffer: list[tuple[float, int]], score: float, rom_id: int) -> None:
     """Keep the best MAX_BUFFERED_NEIGHBOURS offers in a min-heap."""
@@ -72,6 +84,7 @@ class BuildStats:
     roms_indexed: int = 0
     edges_written: int = 0
     roms_without_metadata: int = 0
+    neighbours_updated: int = 0
     total: int = 0
 
 
@@ -102,6 +115,25 @@ class _PairSignals:
         return self.adjacency.get(rom_id, set())
 
 
+@dataclass(frozen=True)
+class _GraphInputs:
+    """One library snapshot, and everything a scoring sweep derives from it."""
+
+    features: dict[int, RomFeatures]
+    vectors: dict[int, dict[str, float]]
+    postings: dict[str, list[int]]
+    signals: _PairSignals
+    identities: Mapping[int, frozenset[str]]
+
+    @property
+    def total_documents(self) -> int:
+        return len(self.features)
+
+
+# Offers waiting to become edges, keyed by the ROM they belong to.
+_Buffers = defaultdict[int, list[tuple[float, int]]]
+
+
 def _series_tokens(feature: RomFeatures) -> set[str]:
     """Every franchise a game carries; keying on one splits a series in two."""
     return {token for token in feature.tokens if token_facet(token) == Facet.FRANCHISE}
@@ -119,10 +151,65 @@ class SimilarityBuilder:
         self.stats = BuildStats()
 
     def build(self) -> BuildStats:
+        """Rescore the whole library, replacing every ROM's edges."""
+        inputs = self._prepare()
+        if inputs is None:
+            return self.stats
+
+        log.info(f"Scoring similarity for {inputs.total_documents} ROMs")
+        self._score_and_write(inputs, sorted(inputs.features))
+
+        log.info(
+            f"Recommendations index built: {self.stats.roms_indexed} ROMs, "
+            f"{self.stats.edges_written} edges"
+        )
+        return self.stats
+
+    def build_for(self, rom_ids: Collection[int]) -> BuildStats:
+        """Score `rom_ids` against the library, leaving the rest of the graph alone.
+
+        The ROMs they match keep their stored neighbours and gain the new ones,
+        rather than being rescored, so a game is reachable from both directions
+        without paying for the all-pairs sweep. Mixing the two snapshots is
+        sound because the stored scores are at most one rebuild old; the
+        nightly build is what makes the whole graph exact again.
+        """
+        if not rom_ids:
+            return self.stats
+
+        inputs = self._prepare()
+        if inputs is None:
+            return self.stats
+
+        requested = set(rom_ids)
+        targets = sorted(requested & inputs.features.keys())
+        # Overwritten rather than added to: `_prepare` counted the whole library.
+        self.stats.roms_without_metadata = len(requested) - len(targets)
+        self.stats.total = len(targets)
+        self._report()
+
+        if not targets:
+            return self.stats
+
+        log.info(f"Scoring similarity for {len(targets)} ROMs against the library")
+        buffers = self._score_and_write(inputs, targets)
+        self._merge_neighbour_edges(inputs, buffers, rescored=set(targets))
+
+        log.info(
+            f"Recommendations index topped up: {self.stats.roms_indexed} ROMs, "
+            f"{self.stats.neighbours_updated} neighbours, "
+            f"{self.stats.edges_written} edges"
+        )
+        return self.stats
+
+    # --- Inputs ------------------------------------------------------------------
+
+    def _prepare(self) -> _GraphInputs | None:
+        """Read the library once and derive everything the scoring needs."""
         feature_rows = db_recommendation_handler.get_feature_rows()
         if not feature_rows:
             log.info("No ROMs to index for recommendations")
-            return self.stats
+            return None
 
         features = self._build_features(feature_rows)
         self.stats.total = len(features)
@@ -151,16 +238,13 @@ class SimilarityBuilder:
         }
         signals = self._collect_pair_signals(features, identities, igdb_to_rom)
 
-        log.info(f"Scoring similarity for {total_documents} ROMs")
-        self._score_and_write(features, vectors, postings, signals, identities)
-
-        log.info(
-            f"Recommendations index built: {self.stats.roms_indexed} ROMs, "
-            f"{self.stats.edges_written} edges"
+        return _GraphInputs(
+            features=features,
+            vectors=vectors,
+            postings=postings,
+            signals=signals,
+            identities=identities,
         )
-        return self.stats
-
-    # --- Inputs ------------------------------------------------------------------
 
     def _build_features(self, rows: Sequence[RomFeatureRow]) -> dict[int, RomFeatures]:
         features: dict[int, RomFeatures] = {}
@@ -280,41 +364,28 @@ class SimilarityBuilder:
     # --- Scoring -----------------------------------------------------------------
 
     def _score_and_write(
-        self,
-        features: dict[int, RomFeatures],
-        vectors: dict[int, dict[str, float]],
-        postings: dict[str, list[int]],
-        signals: _PairSignals,
-        identities: Mapping[int, frozenset[str]],
-    ) -> None:
-        total_documents = len(features)
+        self, inputs: _GraphInputs, targets: Sequence[int]
+    ) -> _Buffers:
+        """Rescore each target against the library and replace its edges.
+
+        Returns the offers left over for ROMs outside `targets`, which a full
+        build never has and a top-up folds into their stored neighbours.
+        """
         batch_rom_ids: list[int] = []
         batch_edges: list[dict[str, Any]] = []
 
-        # Ascending id order is what completes each buffer: once a ROM has
-        # been swept, every pair it belongs to has been scored, so its
-        # neighbours are final and the buffer can be selected from and freed.
-        buffers: defaultdict[int, list[tuple[float, int]]] = defaultdict(list)
+        # Ascending id order is what completes each buffer: once a target has
+        # been swept, every pair it shares with another target has been scored,
+        # so its neighbours are final and the buffer can be selected and freed.
+        buffers: _Buffers = defaultdict(list)
+        swept: set[int] = set()
 
-        for rom_id in sorted(features):
-            self._score_forward(
-                features[rom_id],
-                features,
-                vectors,
-                postings,
-                signals,
-                identities,
-                total_documents,
-                buffers,
-            )
+        for rom_id in targets:
+            self._score_rom(inputs, inputs.features[rom_id], swept, buffers)
+            swept.add(rom_id)
 
             edges = self._select_edges(
-                features[rom_id],
-                buffers.pop(rom_id, []),
-                features,
-                vectors,
-                signals,
-                identities,
+                inputs, inputs.features[rom_id], buffers.pop(rom_id, [])
             )
 
             batch_rom_ids.append(rom_id)
@@ -326,43 +397,43 @@ class SimilarityBuilder:
                 batch_rom_ids, batch_edges = [], []
 
         self._flush(batch_rom_ids, batch_edges)
+        return buffers
 
-    def _score_forward(
+    def _score_rom(
         self,
+        inputs: _GraphInputs,
         feature: RomFeatures,
-        features: dict[int, RomFeatures],
-        vectors: dict[int, dict[str, float]],
-        postings: dict[str, list[int]],
-        signals: _PairSignals,
-        identities: Mapping[int, frozenset[str]],
-        total_documents: int,
-        buffers: defaultdict[int, list[tuple[float, int]]],
+        swept: set[int],
+        buffers: _Buffers,
     ) -> None:
-        """Score this ROM against the candidates above it, in both directions.
+        """Score this ROM against its candidates, offering in both directions.
 
         Candidate generation is symmetric -- two ROMs sharing a token each find
-        the other -- so scoring only from the lower id halves the dot products,
-        which dominate the build.
+        the other -- so an already swept candidate is skipped: scoring the pair
+        from one side halves the dot products, which dominate the build, and
+        scoring it from both would offer the same neighbour twice.
         """
         rom_id = feature.rom_id
-        source_vector = vectors.get(rom_id, {})
+        source_vector = inputs.vectors.get(rom_id, {})
 
-        candidates = candidate_ids(feature, postings, total_documents)
+        candidates = candidate_ids(feature, inputs.postings, inputs.total_documents)
         # A game IGDB relates to, or that users play alongside this one, is
         # worth scoring even when they share no metadata facet at all.
-        candidates |= signals.partners_of(rom_id)
+        candidates |= inputs.signals.partners_of(rom_id)
 
         for candidate_id in candidates:
-            if candidate_id <= rom_id:
+            if candidate_id == rom_id or candidate_id in swept:
                 continue
-            if self._is_duplicate(rom_id, candidate_id, identities):
+            if self._is_duplicate(rom_id, candidate_id, inputs.identities):
                 continue
 
-            content = content_similarity(source_vector, vectors.get(candidate_id, {}))
+            content = content_similarity(
+                source_vector, inputs.vectors.get(candidate_id, {})
+            )
             key = _pair_key(rom_id, candidate_id)
-            igdb_prior = signals.igdb.get(key, 0.0)
-            co_play = signals.co_play.get(key, 0.0)
-            co_collection = signals.co_collection.get(key, 0.0)
+            igdb_prior = inputs.signals.igdb.get(key, 0.0)
+            co_play = inputs.signals.co_play.get(key, 0.0)
+            co_collection = inputs.signals.co_collection.get(key, 0.0)
 
             # Only the target's quality bonus differs by direction, so the pair
             # is blended twice off the one content score.
@@ -372,19 +443,60 @@ class SimilarityBuilder:
                     igdb_prior=igdb_prior,
                     co_play=co_play,
                     co_collection=co_collection,
-                    average_rating=features[target].average_rating,
+                    average_rating=inputs.features[target].average_rating,
                 )
                 if score >= MIN_EDGE_SCORE:
                     _offer(buffers[source], score, target)
 
+    def _merge_neighbour_edges(
+        self,
+        inputs: _GraphInputs,
+        buffers: _Buffers,
+        rescored: set[int],
+    ) -> None:
+        """Fold the ROMs a top-up scored into the neighbour lists of what they matched.
+
+        Reselecting from stored offers plus new ones costs one read and one
+        write per neighbour, where rescoring them would cost another sweep.
+        """
+        ranked = sorted(buffers, key=lambda rom_id: (-max(buffers[rom_id])[0], rom_id))
+        if not ranked:
+            return
+
+        ranked = ranked[:MAX_TOP_UP_NEIGHBOURS]
+        stored = db_recommendation_handler.get_stored_edges(ranked)
+
+        batch_rom_ids: list[int] = []
+        batch_edges: list[dict[str, Any]] = []
+
+        for rom_id in ranked:
+            merged = list(buffers[rom_id])
+            offered = {related_id for _, related_id in merged}
+            for score, related_id in stored.get(rom_id, ()):
+                # An edge to a rescored ROM has just been recomputed, and one to
+                # a ROM that has left the library has nothing left to hydrate.
+                if related_id in offered or related_id in rescored:
+                    continue
+                if related_id in inputs.features:
+                    _offer(merged, score, related_id)
+
+            batch_rom_ids.append(rom_id)
+            batch_edges.extend(
+                self._select_edges(inputs, inputs.features[rom_id], merged)
+            )
+            self.stats.neighbours_updated += 1
+
+            if len(batch_rom_ids) >= BUILD_BATCH_SIZE:
+                self._flush(batch_rom_ids, batch_edges)
+                batch_rom_ids, batch_edges = [], []
+
+        self._flush(batch_rom_ids, batch_edges)
+
     def _select_edges(
         self,
+        inputs: _GraphInputs,
         feature: RomFeatures,
         buffered: list[tuple[float, int]],
-        features: dict[int, RomFeatures],
-        vectors: dict[int, dict[str, float]],
-        signals: _PairSignals,
-        identities: Mapping[int, frozenset[str]],
     ) -> list[dict[str, Any]]:
         """Take the best buffered neighbours, dropping ones that duplicate each other.
 
@@ -392,7 +504,7 @@ class SimilarityBuilder:
         without this two discs of one release would each take a slot.
         """
         rom_id = feature.rom_id
-        source_vector = vectors.get(rom_id, {})
+        source_vector = inputs.vectors.get(rom_id, {})
 
         edges: list[dict[str, Any]] = []
         taken_identities: set[str] = set()
@@ -403,7 +515,7 @@ class SimilarityBuilder:
         for score, candidate_id in sorted(
             buffered, key=lambda item: (-item[0], item[1])
         ):
-            candidate_identity = identities.get(candidate_id, _NO_IDENTITY)
+            candidate_identity = inputs.identities.get(candidate_id, _NO_IDENTITY)
             if not candidate_identity.isdisjoint(taken_identities):
                 continue
             taken_identities |= candidate_identity
@@ -411,13 +523,13 @@ class SimilarityBuilder:
             # IGDB gives every port its own id, so the identity check above
             # cannot catch the same game on other hardware. Ports collide with
             # each other as readily as with the source, hence both comparisons.
-            candidate_title = features[candidate_id].title_key
+            candidate_title = inputs.features[candidate_id].title_key
             if candidate_title:
                 if candidate_title == source_title or candidate_title in taken_titles:
                     continue
                 taken_titles.add(candidate_title)
 
-            series = _series_tokens(features[candidate_id])
+            series = _series_tokens(inputs.features[candidate_id])
             if series and any(
                 series_counts.get(token, 0) >= MAX_STORED_PER_SERIES for token in series
             ):
@@ -425,8 +537,10 @@ class SimilarityBuilder:
             for token in series:
                 series_counts[token] = series_counts.get(token, 0) + 1
 
-            reasons = shared_reasons(source_vector, vectors.get(candidate_id, {}))
-            if _pair_key(rom_id, candidate_id) in signals.igdb:
+            reasons = shared_reasons(
+                source_vector, inputs.vectors.get(candidate_id, {})
+            )
+            if _pair_key(rom_id, candidate_id) in inputs.signals.igdb:
                 reasons.append({"facet": Facet.IGDB, "value": "similar"})
 
             edges.append(
@@ -454,3 +568,33 @@ class SimilarityBuilder:
     def _report(self) -> None:
         if self._progress:
             self._progress(self.stats)
+
+
+def top_up_similarity(rom_ids: Collection[int]) -> None:
+    """Give freshly scanned ROMs their edges without waiting for the nightly build.
+
+    Runs inline for the ordinary case of a scan that touched part of a library.
+    A scan that touched most of one is handed to the rebuild task instead, both
+    because the incremental path saves nothing at that size and because the
+    caller should not block on it.
+    """
+    unique_ids = set(rom_ids)
+    if not unique_ids:
+        return
+
+    if len(unique_ids) > MAX_TOP_UP_ROMS:
+        # Deferred: the task registry imports every task module, and one of
+        # them imports this package.
+        from tasks.registry import enqueue_task
+
+        log.info(
+            f"{len(unique_ids)} ROMs scanned, more than a recommendations top-up "
+            "is worth; queueing a full rebuild instead"
+        )
+        enqueue_task("build_recommendations", task_kwargs={"force": True})
+        return
+
+    stats = SimilarityBuilder().build_for(unique_ids)
+    if stats.roms_indexed:
+        # Every cached ranking was computed against the graph this just moved.
+        invalidate_all_cached_feeds()
