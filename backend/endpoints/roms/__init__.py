@@ -41,6 +41,7 @@ from config import (
 )
 from decorators.auth import protected_route
 from endpoints.responses import BulkOperationResponse
+from endpoints.responses.recommendation import SimilarRomSchema
 from endpoints.responses.rom import (
     DetailedRomSchema,
     RomFiltersDict,
@@ -83,6 +84,7 @@ from handler.metadata import (
 )
 from handler.metadata.launchbox_handler.media import populate_rom_specific_paths
 from handler.metadata.ss_handler import add_ss_auth_to_url, get_preferred_media_types
+from handler.recommendation import similar_roms
 from handler.rom_conversion import promote_single_file_to_folder
 from handler.scan_handler import (
     MetadataSource,
@@ -1395,6 +1397,42 @@ def get_rom_simple(
     assert_rom_visible(request, rom)
 
     return SimpleRomSchema.from_orm_with_request(rom, request)
+
+
+@protected_route(
+    router.get,
+    "/{id}/similar",
+    [Scope.ROMS_READ],
+    responses={status.HTTP_404_NOT_FOUND: {}},
+)
+def get_similar_roms(
+    request: Request,
+    id: Annotated[int, PathVar(description="Rom internal id.", ge=1)],
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Maximum similar roms to return")
+    ] = 12,
+) -> list[SimilarRomSchema]:
+    """Games in this library that resemble the given one.
+
+    Read from the precomputed similarity graph, so unlike IGDB's own related
+    games every result is a title the server actually holds.
+    """
+
+    rom = db_rom_handler.get_rom_simple(id)
+
+    if not rom:
+        raise RomNotFoundInDatabaseException(id)
+
+    assert_rom_visible(request, rom)
+
+    return [
+        SimilarRomSchema(
+            rom=SimpleRomSchema.from_orm_with_request(item.rom, request),
+            score=item.score,
+            reasons=item.reasons,  # type: ignore[arg-type]
+        )
+        for item in similar_roms(id, limit=limit, permissions=get_permissions(request))
+    ]
 
 
 @protected_route(
