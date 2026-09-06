@@ -66,9 +66,9 @@ DEFAULT_EXCLUDED_PLATFORM_DIRS: Final = [
     ".DocumentRevisions-V100",
     "System Volume Information",
 ]
-# The per-media-type folders ES-DE and Batocera resolve beside the ROMs, at
-# <platform>/<folder>/<rom>.<ext>.
-GAMELIST_MEDIA_DIRS: Final = {
+# The per-media-type folders beside the ROMs, at <platform>/<folder>/<rom>.<ext>.
+# ES-DE and Batocera resolve media here by name; the Pegasus export shares them.
+PLATFORM_MEDIA_DIRS: Final = {
     "image": "images",
     "box2d": "covers",
     "box2d_back": "backcovers",
@@ -88,7 +88,7 @@ GAMELIST_MEDIA_DIRS: Final = {
 # Folders inside a platform that are never a multi-file ROM (a ROM whose parts
 # live in a directory). Scraper media output lands here, so it is skipped too.
 DEFAULT_EXCLUDED_MULTI_FILE_DIRS: Final = sorted(
-    {*DEFAULT_EXCLUDED_PLATFORM_DIRS, *GAMELIST_MEDIA_DIRS.values()}
+    {*DEFAULT_EXCLUDED_PLATFORM_DIRS, *PLATFORM_MEDIA_DIRS.values()}
 )
 
 

@@ -10,7 +10,7 @@ from xml.etree.ElementTree import Element  # trunk-ignore(bandit/B405)
 import pydash
 from defusedxml import ElementTree as ET
 
-from config.config_manager import GAMELIST_MEDIA_DIRS, MetadataMediaType
+from config.config_manager import PLATFORM_MEDIA_DIRS, MetadataMediaType
 from config.config_manager import config_manager as cm
 from handler.filesystem import fs_platform_handler, fs_resource_handler
 from logger.logger import log
@@ -86,20 +86,20 @@ class GamelistRom(BaseRom):
 
 
 ESDE_MEDIA_MAP: Final = {
-    "image_url": GAMELIST_MEDIA_DIRS["image"],
-    "box2d_url": GAMELIST_MEDIA_DIRS["box2d"],
-    "box2d_back_url": GAMELIST_MEDIA_DIRS["box2d_back"],
-    "box3d_url": GAMELIST_MEDIA_DIRS["box3d"],
-    "fanart_url": GAMELIST_MEDIA_DIRS["fanart"],
-    "manual_url": GAMELIST_MEDIA_DIRS["manual"],
-    "marquee_url": GAMELIST_MEDIA_DIRS["marquee"],
-    "miximage_url": GAMELIST_MEDIA_DIRS["miximage"],
-    "miximage_v2_url": GAMELIST_MEDIA_DIRS["miximage_v2"],
-    "physical_url": GAMELIST_MEDIA_DIRS["physical"],
-    "screenshot_url": GAMELIST_MEDIA_DIRS["screenshot"],
-    "title_screen_url": GAMELIST_MEDIA_DIRS["title_screen"],
-    "thumbnail_url": GAMELIST_MEDIA_DIRS["thumbnail"],
-    "video_url": GAMELIST_MEDIA_DIRS["video"],
+    "image_url": PLATFORM_MEDIA_DIRS["image"],
+    "box2d_url": PLATFORM_MEDIA_DIRS["box2d"],
+    "box2d_back_url": PLATFORM_MEDIA_DIRS["box2d_back"],
+    "box3d_url": PLATFORM_MEDIA_DIRS["box3d"],
+    "fanart_url": PLATFORM_MEDIA_DIRS["fanart"],
+    "manual_url": PLATFORM_MEDIA_DIRS["manual"],
+    "marquee_url": PLATFORM_MEDIA_DIRS["marquee"],
+    "miximage_url": PLATFORM_MEDIA_DIRS["miximage"],
+    "miximage_v2_url": PLATFORM_MEDIA_DIRS["miximage_v2"],
+    "physical_url": PLATFORM_MEDIA_DIRS["physical"],
+    "screenshot_url": PLATFORM_MEDIA_DIRS["screenshot"],
+    "title_screen_url": PLATFORM_MEDIA_DIRS["title_screen"],
+    "thumbnail_url": PLATFORM_MEDIA_DIRS["thumbnail"],
+    "video_url": PLATFORM_MEDIA_DIRS["video"],
 }
 
 XML_TAG_MAP: Final = {
@@ -118,6 +118,11 @@ XML_TAG_MAP: Final = {
     "thumbnail_url": "thumbnail",
     "video_url": "video",
 }
+
+
+def gamelist_path_to_filename(raw_path: str) -> str:
+    """Return the filename a gamelist <path> refers to, without the `./` prefix."""
+    return os.path.basename(raw_path.removeprefix("./"))
 
 
 def _make_file_uri(platform_dir: str, raw_text: str) -> str:
@@ -421,13 +426,7 @@ class GamelistHandler(MetadataHandler):
                 if path_elem is None or path_elem.text is None:
                     continue
 
-                # Handle relative paths
-                rom_path = path_elem.text
-                if rom_path.startswith("./"):
-                    rom_path = rom_path[2:]
-
-                # Extract filename for matching
-                rom_filename = os.path.basename(rom_path)
+                rom_filename = gamelist_path_to_filename(path_elem.text)
 
                 # Extract metadata
                 name_elem = game.find("name")

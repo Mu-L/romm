@@ -26,6 +26,8 @@ from models.permission import (
     PermissionGroupGrant,
 )
 from models.rom import Rom, RomFile, RomFileCategory
+from utils.gamelist_exporter import GamelistExporter
+from utils.pegasus_exporter import PegasusExporter
 
 
 def _auth(user):
@@ -153,6 +155,29 @@ def test_physical_game_create_on_hidden_platform_is_404_masked(
     )
     assert resp.status_code == status.HTTP_404_NOT_FOUND
     assert db_rom_handler.get_roms_scalar(platform_ids=[platform.id]) == []
+
+
+@pytest.mark.parametrize(
+    ("path", "exporter"),
+    [
+        ("/api/export/gamelist-xml", GamelistExporter),
+        ("/api/export/pegasus", PegasusExporter),
+    ],
+)
+def test_export_of_hidden_platform_is_404_masked(
+    client, editor_user, platform, monkeypatch, path, exporter
+):
+    # Editor holds platforms write, so the coarse gate passes. The hide must
+    # mask the export before it reads or rewrites the platform's metadata file.
+    _hide(PermEntity.PLATFORMS, platform.id, editor_user.id)
+
+    async def _unreachable(*args, **kwargs):
+        raise AssertionError("exported a hidden platform")
+
+    monkeypatch.setattr(exporter, "export_platform_to_file", _unreachable)
+
+    resp = client.post(f"{path}?platform_ids={platform.id}", headers=_auth(editor_user))
+    assert resp.status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_hidden_rom_props_update_is_404_masked(client, viewer_user, rom):

@@ -3,7 +3,8 @@
 // Four rows, top to bottom:
 //   1. Title (+ previous / next game arrows on the right)
 //   2. Meta (year · platform-icon + platform · verified RTag)
-//   3. Tags (regions + languages + custom tags) — RTag primitive
+//   3. Tags (regions + languages + custom tags) — RTag primitive,
+//      each a `searchLocation` pivot into the filtered search
 //   4. GameActions (Play · Download · Favorite · Share · More)
 //
 // Metadata-provider links live in the Metadata tab, not the header.
@@ -16,6 +17,7 @@ import MainSiblingToggle from "@/v2/components/GameDetails/MainSiblingToggle.vue
 import PrevNextNav from "@/v2/components/GameDetails/PrevNextNav.vue";
 import VersionSwitcher from "@/v2/components/GameDetails/VersionSwitcher.vue";
 import { useGameActions } from "@/v2/composables/useGameActions";
+import { searchLocation } from "@/v2/utils/searchLocation";
 
 defineOptions({ inheritAttrs: false });
 
@@ -92,21 +94,30 @@ const actions = useGameActions(() => props.rom);
         v-if="regions.length || languages.length || tags.length"
         class="r-v2-det-header__tags"
       >
-        <RTag
+        <router-link
           v-for="r in regions"
           :key="`r-${r}`"
-          :text="r"
-          tone="info"
-          size="small"
-        />
-        <RTag
+          :to="searchLocation('regions', r)"
+          class="r-v2-det-header__tag-link"
+        >
+          <RTag :text="r" tone="info" size="small" />
+        </router-link>
+        <router-link
           v-for="l in languages"
           :key="`l-${l}`"
-          :text="l"
-          tone="brand"
-          size="small"
-        />
-        <RTag v-for="t in tags" :key="`t-${t}`" :text="t" size="small" />
+          :to="searchLocation('languages', l)"
+          class="r-v2-det-header__tag-link"
+        >
+          <RTag :text="l" tone="brand" size="small" />
+        </router-link>
+        <router-link
+          v-for="tag in tags"
+          :key="`t-${tag}`"
+          :to="searchLocation('tags', tag)"
+          class="r-v2-det-header__tag-link"
+        >
+          <RTag :text="tag" size="small" />
+        </router-link>
       </span>
     </div>
 
@@ -181,6 +192,16 @@ const actions = useGameActions(() => props.rom);
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.r-v2-det-header__tag-link {
+  display: inline-flex;
+  text-decoration: none;
+  border-radius: var(--r-radius-chip);
+}
+/* Strengthen the border in the tag's own tone so the affordance reads the
+   same for region / language / custom tags. */
+.r-v2-det-header__tag-link:hover :deep(.r-tag) {
+  --r-tag-border: var(--r-tag-fg);
 }
 
 .r-v2-det-header__versions {
