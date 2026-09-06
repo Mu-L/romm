@@ -94,6 +94,13 @@ CO_COLLECTION_WEIGHT: Final = 0.10
 # enough that it reorders ties without overriding genuine relatedness.
 MAX_QUALITY_BONUS: Final = 0.05
 
+# Sightings a co-occurrence needs before it is taken at face value. One user
+# playing two games makes them a perfect cosine match, and most servers have
+# one user, so agreement is damped by the evidence behind it the same way a
+# rating is by its vote count. A lone sighting keeps a quarter of its weight,
+# which leaves it below MIN_EDGE_SCORE on its own.
+CO_OCCURRENCE_PRIOR: Final = 3.0
+
 # Length-normalisation strength: 1.0 is plain L2, 0.0 scales every vector by
 # the library average instead of its own length. Zero because facet counts are
 # not verbosity: a richly tagged game really does have more in common, and
@@ -413,11 +420,15 @@ def candidate_ids(
 def normalise_co_occurrence(
     pair_count: float, left_total: int, right_total: int
 ) -> float:
-    """Cosine-style normalisation of a raw co-occurrence count.
+    """Cosine-style normalisation of a raw co-occurrence count, damped by support.
 
-    Without this, whatever ROM sits in the most collections (or has the most
-    play sessions) would look related to everything.
+    The cosine stops whatever ROM sits in the most collections from looking
+    related to everything; the support term stops a pair seen once from
+    outscoring one a whole server agrees on. See CO_OCCURRENCE_PRIOR.
     """
     if pair_count <= 0 or left_total <= 0 or right_total <= 0:
         return 0.0
-    return min(1.0, pair_count / math.sqrt(left_total * right_total))
+
+    cosine = pair_count / math.sqrt(left_total * right_total)
+    support = pair_count / (pair_count + CO_OCCURRENCE_PRIOR)
+    return min(1.0, cosine * support)

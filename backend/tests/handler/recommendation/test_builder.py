@@ -5,6 +5,8 @@ Metadata is seeded by writing a provider blob on `roms`, because
 trigger-maintained from the same source: writing the blob is what drives both.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
 from handler.database import (
@@ -15,6 +17,7 @@ from handler.database import (
 from handler.recommendation import SimilarityBuilder, builder
 from models.platform import Platform
 from models.rom import Rom
+from models.user import User
 
 
 def make_rom(
@@ -248,6 +251,28 @@ def test_storefront_copies_of_one_game_are_not_recommendations(
     }
     assert single.id not in neighbours
     assert sequel.id in neighbours
+
+
+def test_one_users_play_history_does_not_relate_unrelated_games(
+    platform: Platform, admin_user: User
+):
+    """Most servers have one user, whose every played pair is a perfect cosine."""
+    tetris = make_rom(platform, "Tetris", igdb_id=3001, genres=["Puzzle"])
+    madden = make_rom(platform, "Madden NFL", igdb_id=3002, genres=["Sport"])
+
+    for rom in (tetris, madden):
+        rom_user = db_rom_handler.add_rom_user(rom.id, admin_user.id)
+        db_rom_handler.update_rom_user(
+            rom_user.id, {"last_played": datetime.now(timezone.utc)}
+        )
+
+    SimilarityBuilder().build()
+
+    neighbours = {
+        edge.rom_id
+        for edge in db_recommendation_handler.get_similar_rom_edges(tetris.id)
+    }
+    assert madden.id not in neighbours
 
 
 def test_steam_only_games_are_indexed(platform: Platform):

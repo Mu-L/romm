@@ -494,6 +494,19 @@ def test_context_only_vectors_would_otherwise_match_each_other():
     assert identical == pytest.approx(self_match)
 
 
+def test_co_occurrence_is_damped_by_how_often_it_was_seen():
+    # A perfect cosine either way: the only thing separating these is how much
+    # evidence sits behind them.
+    once = normalise_co_occurrence(1, left_total=1, right_total=1)
+    thrice = normalise_co_occurrence(3, left_total=3, right_total=3)
+    often = normalise_co_occurrence(10, left_total=10, right_total=10)
+
+    assert once < thrice < often <= 1.0
+    # One sighting is what a single-user server produces for every pair of
+    # games its owner has played, so it must not read as agreement.
+    assert once < 0.3
+
+
 def test_normalise_co_occurrence_damps_ubiquitous_items():
     # Two games seen together twice, where one appears in everything.
     focused = normalise_co_occurrence(2, left_total=2, right_total=2)
