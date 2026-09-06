@@ -38,13 +38,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from sqlalchemy import distinct, func, select  # noqa: E402
 
-from handler.auth.permissions import (  # noqa: E402
-    ResolvedPermissions,
-    resolve_permissions,
-)
+# Imported ahead of everything else that reaches `decorators.database`, which
+# imports back out of this package: whichever of the two loads second resolves,
+# and the app only works because it always initialises this one first.
 from handler.database import (  # noqa: E402
     db_recommendation_handler,
     db_user_handler,
+)
+
+# isort: split
+from handler.auth.permissions import (  # noqa: E402
+    ResolvedPermissions,
+    resolve_permissions,
 )
 from handler.database.base_handler import sync_session  # noqa: E402
 from handler.recommendation import (  # noqa: E402
