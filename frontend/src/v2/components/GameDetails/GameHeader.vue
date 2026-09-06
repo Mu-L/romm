@@ -3,21 +3,21 @@
 // Four rows, top to bottom:
 //   1. Title (+ previous / next game arrows on the right)
 //   2. Meta (year · platform-icon + platform · verified RTag)
-//   3. Tags (regions + languages + custom tags) — RTag primitive
+//   3. Tags (regions + languages + custom tags) — RTag primitive,
+//      each a `searchLocation` pivot into the filtered search
 //   4. GameActions (Play · Download · Favorite · Share · More)
 //
 // Metadata-provider links live in the Metadata tab, not the header.
 // Genre/franchise belong in the Overview tab info grid.
 import { RIcon, RPlatformIcon, RTag, RTooltip } from "@v2/lib";
 import { useI18n } from "vue-i18n";
-import { ROUTES } from "@/plugins/router";
-import type { FilterType } from "@/stores/galleryFilter";
 import type { DetailedRom } from "@/stores/roms";
 import GameActions from "@/v2/components/GameActions/GameActions.vue";
 import MainSiblingToggle from "@/v2/components/GameDetails/MainSiblingToggle.vue";
 import PrevNextNav from "@/v2/components/GameDetails/PrevNextNav.vue";
 import VersionSwitcher from "@/v2/components/GameDetails/VersionSwitcher.vue";
 import { useGameActions } from "@/v2/composables/useGameActions";
+import { searchLocation } from "@/v2/utils/searchLocation";
 
 defineOptions({ inheritAttrs: false });
 
@@ -35,13 +35,6 @@ const props = defineProps<{
 }>();
 
 const actions = useGameActions(() => props.rom);
-
-// Same pivot-to-search the Overview info grid offers on genres/companies:
-// a link (not a click handler) so middle-click and open-in-new-tab work.
-const searchLocation = (filter: FilterType, item: string) => ({
-  name: ROUTES.SEARCH,
-  query: { [filter]: item },
-});
 </script>
 
 <template>
