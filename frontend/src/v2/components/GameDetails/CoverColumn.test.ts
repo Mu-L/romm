@@ -7,6 +7,9 @@ import CoverColumn from "./CoverColumn.vue";
 // The lightbox is auto-stubbed by shallowMount; match it by component name.
 const CAROUSEL = { name: "RCarousel" };
 
+const COVER_URL = "/assets/romm/resources/roms/1/cover/big.png";
+const FALLBACK_URL = "https://provider.example/cover.png";
+
 vi.mock("vue-i18n", () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
@@ -15,7 +18,7 @@ function rom(overrides: Partial<DetailedRom> = {}): DetailedRom {
   return {
     id: 1,
     is_identified: true,
-    path_cover_large: "/assets/romm/resources/roms/1/cover/big.png",
+    path_cover_large: COVER_URL,
     path_cover_small: null,
     url_cover: null,
     path_video: null,
@@ -26,12 +29,19 @@ function rom(overrides: Partial<DetailedRom> = {}): DetailedRom {
   } as DetailedRom;
 }
 
-function mountCover(overrides: Partial<DetailedRom> = {}) {
+// Stands in for GameCover: renders the chrome slot (the default stub would
+// swallow the zoom hint) and reports whichever src the test says is on screen.
+function coverStub(renderedSrc: string | null) {
+  return { setup: () => ({ renderedSrc }), template: "<div><slot /></div>" };
+}
+
+function mountCover(
+  overrides: Partial<DetailedRom> = {},
+  renderedSrc: string | null = COVER_URL,
+) {
   return shallowMount(CoverColumn, {
     props: { rom: rom(overrides), alt: "Super Mario World" },
-    // The zoom hint lives in GameCover's chrome slot, which the default
-    // stub would swallow.
-    global: { stubs: { GameCover: { template: "<div><slot /></div>" } } },
+    global: { stubs: { GameCover: coverStub(renderedSrc) } },
   });
 }
 
@@ -52,13 +62,22 @@ describe("CoverColumn zoom", () => {
 
     const carousel = wrapper.findComponent(CAROUSEL);
     expect(carousel.exists()).toBe(true);
-    expect(carousel.props("items")).toEqual([
-      "/assets/romm/resources/roms/1/cover/big.png",
+    expect(carousel.props("items")).toEqual([COVER_URL]);
+  });
+
+  it("follows the cover onto its fallback artwork", async () => {
+    // The primary image failed, so the cover is painting `url_cover`.
+    const wrapper = mountCover({ url_cover: FALLBACK_URL }, FALLBACK_URL);
+
+    await wrapper.get("button.r-v2-det-cover__zoom").trigger("click");
+
+    expect(wrapper.findComponent(CAROUSEL).props("items")).toEqual([
+      FALLBACK_URL,
     ]);
   });
 
   it("stays inert when the rom has no cover to zoom into", async () => {
-    const wrapper = mountCover({ path_cover_large: null });
+    const wrapper = mountCover({ path_cover_large: null }, null);
     const button = wrapper.get("button.r-v2-det-cover__zoom");
 
     expect(button.attributes("disabled")).toBeDefined();

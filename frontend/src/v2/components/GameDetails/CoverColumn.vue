@@ -15,7 +15,7 @@
 // a different style, an incomplete set, or a failed image — falls straight
 // back to the flat GameCover.
 import { RBox3D, RCarousel, RIcon } from "@v2/lib";
-import { computed, ref } from "vue";
+import { computed, ref, useTemplateRef } from "vue";
 import { useI18n } from "vue-i18n";
 import type { DetailedRom } from "@/stores/roms";
 import GameCover from "@/v2/components/shared/GameCover.vue";
@@ -43,12 +43,17 @@ const box3d = computed(() => {
   return { front: f.front, back: f.back, spine: f.spine };
 });
 
-// Same resolution GameCover runs internally, so the lightbox shows exactly
-// the artwork on screen. Null means the cover is a placeholder: nothing to
+// A rom with no artwork at all paints the procedural placeholder: nothing to
 // zoom into, so the hero stays inert.
 const art = useCoverArt(() => props.rom, { context: () => "details" });
-const zoomSrc = computed(() => art.coverUrl.value ?? art.fallbackUrl.value);
-const zoomOpen = ref(false);
+const cover = useTemplateRef("cover");
+const zoomSrc = ref<string | null>(null);
+
+// Ask the cover what it is rendering rather than re-resolving it here — it
+// swaps to the external fallback when the primary image fails.
+function openZoom() {
+  zoomSrc.value = cover.value?.renderedSrc ?? null;
+}
 </script>
 
 <template>
@@ -66,11 +71,12 @@ const zoomOpen = ref(false);
       v-else
       type="button"
       class="r-v2-det-cover__zoom"
-      :disabled="!zoomSrc"
+      :disabled="!art.hasArtwork.value"
       :aria-label="t('rom.cover-open')"
-      @click="zoomOpen = true"
+      @click="openZoom"
     >
       <GameCover
+        ref="cover"
         class="r-v2-det-cover__art"
         :rom="rom"
         :title="alt"
@@ -80,19 +86,19 @@ const zoomOpen = ref(false);
         morph-static
         hover-motion
       >
-        <span v-if="zoomSrc" class="r-v2-det-cover__zoom-hint">
+        <span v-if="art.hasArtwork.value" class="r-v2-det-cover__zoom-hint">
           <RIcon icon="mdi-magnify-plus-outline" size="18" />
         </span>
       </GameCover>
     </button>
 
     <RCarousel
-      v-if="zoomOpen && zoomSrc"
+      v-if="zoomSrc"
       :model-value="0"
       :items="[zoomSrc]"
       fullscreen
       :aria-label="t('rom.cover-art')"
-      @close="zoomOpen = false"
+      @close="zoomSrc = null"
     >
       <template #default="{ item }">
         <img :src="item" :alt="alt" />
