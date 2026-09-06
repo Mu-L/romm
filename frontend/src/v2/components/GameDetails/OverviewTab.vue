@@ -64,7 +64,6 @@ const props = defineProps<{
   remasters: IGDBRelatedGame[];
   ports: IGDBRelatedGame[];
   similarRoms: SimilarRomSchema[];
-  webp?: boolean;
 }>();
 
 // The same preference hides the "Recommended for you" row on Home: the
@@ -101,7 +100,7 @@ const hasHltb = computed(() => {
 // the AppLayout fetch resolves).
 const { t } = useI18n();
 const collectionsStore = storeCollections();
-const { toWebp } = useWebpSupport();
+const { supportsWebp, toWebp } = useWebpSupport();
 
 // Videos surface on the overview (the rest of the art lives in the Media tab's
 // Artwork subtab). Same resolver, filtered to videos: scraped clips plus any
@@ -340,7 +339,7 @@ const coverSource = computed(() => {
           <RIcon icon="mdi-shape-outline" size="14" />
           {{ t("recommendations.similar-games") }}
         </h4>
-        <SimilarGamesGrid :items="visibleSimilarRoms" :webp="webp" />
+        <SimilarGamesGrid :items="visibleSimilarRoms" :webp="supportsWebp" />
       </div>
     </template>
 

@@ -20,7 +20,10 @@ vi.mock("@/stores/collections", () => ({
 }));
 
 vi.mock("@/v2/composables/useWebpSupport", () => ({
-  useWebpSupport: () => ({ toWebp: (url: string) => url }),
+  useWebpSupport: () => ({
+    supportsWebp: ref(false),
+    toWebp: (url: string) => url,
+  }),
 }));
 
 // Artwork and collection mosaics belong to other sections; stubbed so this

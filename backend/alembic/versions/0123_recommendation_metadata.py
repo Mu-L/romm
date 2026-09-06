@@ -305,11 +305,18 @@ def _maria_rating(source: str, key: str, multiplier: int) -> str:
 
 
 def _maria_rating_count() -> str:
-    branches = [
-        f"NULLIF(JSON_VALUE({src}, '$.total_rating_count'), '')"
-        for src in _IGDB_SOURCES
-    ]
-    return "CAST(COALESCE(" + ", ".join(branches) + ", 0) AS SIGNED)"
+    # JSON_UNQUOTE(JSON_EXTRACT(...)) rather than JSON_VALUE, which MySQL only
+    # gained in 8.0.21; digit-checked before the cast like every other numeric
+    # branch here, so a non-numeric blob value falls through instead of casting
+    # to a silent 0.
+    branches = []
+    for src in _IGDB_SOURCES:
+        val = f"JSON_UNQUOTE(JSON_EXTRACT({src}, '$.total_rating_count'))"
+        branches.append(
+            f"CASE WHEN JSON_CONTAINS_PATH({src}, 'one', '$.total_rating_count') "
+            f"AND {val} REGEXP '^[0-9]+$' THEN CAST({val} AS SIGNED) ELSE NULL END"
+        )
+    return "COALESCE(" + ", ".join(branches) + ", 0)"
 
 
 # ---------------------------------------------------------------------------
@@ -363,12 +370,16 @@ def _postgres_rating(source: str, key: str, multiplier: int) -> str:
 
 
 def _postgres_rating_count() -> str:
-    branches = [f"({src} ->> 'total_rating_count')" for src in _IGDB_SOURCES]
-    return (
-        "COALESCE("
-        + ", ".join(f"NULLIF({b}, '')::numeric" for b in branches)
-        + ", 0)::bigint"
-    )
+    # Digit-checked before the cast, as every other numeric branch here is:
+    # the blobs are writable verbatim through the raw-metadata form, and an
+    # uncastable value in a generated column rejects every write to the row.
+    branches = [
+        f"CASE WHEN {src} IS NOT NULL AND {src} ? 'total_rating_count' "
+        f"AND ({src} ->> 'total_rating_count') ~ '^[0-9]+$' "
+        f"THEN ({src} ->> 'total_rating_count')::bigint ELSE NULL END"
+        for src in _IGDB_SOURCES
+    ]
+    return "COALESCE(" + ", ".join(branches) + ", 0)::bigint"
 
 
 # ---------------------------------------------------------------------------

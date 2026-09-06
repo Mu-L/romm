@@ -12,6 +12,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import type { IGDBRelatedGame, SimilarRomSchema } from "@/__generated__";
+import { useUISettings } from "@/composables/useUISettings";
 import romApi from "@/services/api/rom";
 import storeAuth from "@/stores/auth";
 import storeRoms from "@/stores/roms";
@@ -41,7 +42,8 @@ const romsStore = storeRoms();
 const authStore = storeAuth();
 const streamingStore = useStreamingStore();
 const { currentRom } = storeToRefs(romsStore);
-const { supportsWebp, toWebp } = useWebpSupport();
+const { toWebp } = useWebpSupport();
+const { showRecommendations } = useUISettings();
 const { locale, t } = useI18n();
 
 const setBgArt = useBackgroundArt();
@@ -246,13 +248,13 @@ const igdb = computed(() => currentRom.value?.igdb_metadata ?? null);
 // hold and absent entirely for anything IGDB never matched.
 const similarRoms = ref<SimilarRomSchema[]>([]);
 
-// Keyed on the id alone: `currentRom` is reassigned wholesale by every
-// optimistic mutation, which would blank the grid mid-interaction.
+// Keyed on the id rather than the ROM: `currentRom` is reassigned wholesale
+// by every optimistic mutation, which would blank the grid mid-interaction.
 watch(
-  () => currentRom.value?.id,
-  (romId, _previous, onCleanup) => {
+  [() => currentRom.value?.id, showRecommendations],
+  ([romId, enabled], _previous, onCleanup) => {
     similarRoms.value = [];
-    if (!romId) return;
+    if (!romId || !enabled) return;
 
     const controller = new AbortController();
     onCleanup(() => controller.abort());
@@ -345,7 +347,6 @@ const tabs = computed<RTabNavItem[]>(() => [
             :remasters="remasters"
             :ports="ports"
             :similar-roms="similarRoms"
-            :webp="supportsWebp"
           />
           <FilesTab v-if="tab === 'files'" :rom="currentRom" />
           <PatcherTab v-if="tab === 'patcher'" :rom="currentRom" />
