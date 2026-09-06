@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Final
 
 from fastapi import Request
 
+from config.config_manager import GAMELIST_MEDIA_DIRS
 from handler.database import db_platform_handler, db_rom_handler
 from handler.filesystem import fs_platform_handler, fs_resource_handler
 from logger.logger import log
@@ -114,19 +116,21 @@ SLUG_TO_PEGASUS: dict[UPS, tuple[str, str]] = {
     UPS.STEAM: ("Steam", "steam"),
 }
 
-# Map Pegasus asset keys to subdirectory names inside assets/
-ASSET_DIRS: dict[str, str] = {
-    "box_front": "covers",
-    "box_back": "backcovers",
-    "box_full": "boxes",
-    "screenshot": "screenshots",
-    "titlescreen": "titlescreens",
-    "video": "videos",
-    "marquee": "marquees",
-    "cartridge": "cartridges",
-    "logo": "logos",
-    "background": "backgrounds",
-    "bezel": "bezels",
+# Pegasus resolves media from the paths written in metadata.pegasus.txt, so its
+# files share the ES-DE media folders instead of a parallel assets/ tree. ES-DE
+# keeps logos under marquees.
+PEGASUS_MEDIA_KEYS: Final[dict[str, str]] = {
+    "box_front": "box2d",
+    "box_back": "box2d_back",
+    "box_full": "box3d",
+    "screenshot": "screenshot",
+    "titlescreen": "title_screen",
+    "video": "video",
+    "marquee": "marquee",
+    "logo": "marquee",
+    "cartridge": "physical",
+    "background": "fanart",
+    "bezel": "bezel",
 }
 
 
@@ -356,7 +360,7 @@ class PegasusExporter:
         request: Request | None,
     ) -> bool:
         """Export platform ROMs to metadata.pegasus.txt file in the platform's directory,
-        including media assets copied into a local assets/ folder.
+        copying media into the ES-DE per-type folders when local_export=True.
 
         Args:
             platform_id: Platform ID to export
@@ -396,12 +400,12 @@ class PegasusExporter:
                     assets = self._collect_assets(rom)
 
                     for asset_key, source_path in assets.items():
-                        subdir = ASSET_DIRS.get(asset_key, asset_key)
+                        subdir = GAMELIST_MEDIA_DIRS[PEGASUS_MEDIA_KEYS[asset_key]]
                         dest_name = f"{rom.fs_name_no_ext}{source_path.suffix}"
-                        dest_path = platform_dir / "assets" / subdir / dest_name
+                        dest_path = platform_dir / subdir / dest_name
 
                         if self._copy_asset(source_path, dest_path):
-                            exported_assets[asset_key] = f"assets/{subdir}/{dest_name}"
+                            exported_assets[asset_key] = f"{subdir}/{dest_name}"
 
                 if game_count > 0:
                     lines.append("")
