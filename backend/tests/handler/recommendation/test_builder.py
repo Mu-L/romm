@@ -1,8 +1,8 @@
 """End-to-end checks for the similarity index build.
 
-Metadata is seeded by writing `roms.igdb_metadata`, because `roms_metadata` is
-a view over generated columns and `roms_facets` is trigger-maintained from the
-same source: writing the blob is what drives both.
+Metadata is seeded by writing a provider blob on `roms`, because
+`roms_metadata` is a view over generated columns and `roms_facets` is
+trigger-maintained from the same source: writing the blob is what drives both.
 """
 
 import pytest
@@ -32,6 +32,7 @@ def make_rom(
     port_igdb_ids: list[int] | None = None,
     average_rating: float | None = None,
     rating_votes: int | None = None,
+    source: str = "igdb_metadata",
 ) -> Rom:
     metadata: dict = {
         "genres": genres or [],
@@ -71,7 +72,7 @@ def make_rom(
             igdb_id=igdb_id,
             steam_id=steam_id,
             moby_id=moby_id,
-            igdb_metadata=metadata,
+            **{source: metadata},
         )
     )
 
@@ -247,6 +248,34 @@ def test_storefront_copies_of_one_game_are_not_recommendations(
     }
     assert single.id not in neighbours
     assert sequel.id in neighbours
+
+
+def test_steam_only_games_are_indexed(platform: Platform):
+    """Steam feeds the same generated facet columns every other provider does."""
+    knight = make_rom(
+        platform,
+        "Hollow Knight",
+        steam_id=367520,
+        genres=["Action", "Indie"],
+        companies=["Team Cherry"],
+        source="steam_metadata",
+    )
+    silksong = make_rom(
+        platform,
+        "Hollow Knight Silksong",
+        steam_id=1030300,
+        genres=["Action", "Indie"],
+        companies=["Team Cherry"],
+        source="steam_metadata",
+    )
+
+    SimilarityBuilder().build()
+
+    neighbours = {
+        edge.rom_id
+        for edge in db_recommendation_handler.get_similar_rom_edges(knight.id)
+    }
+    assert silksong.id in neighbours
 
 
 def test_ports_of_one_game_take_a_single_slot(platform: Platform):
