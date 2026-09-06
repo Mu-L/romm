@@ -221,6 +221,17 @@ _MYSQL_TRIGGERS = {
 # ---------------------------------------------------------------------------
 
 
+def _maria_text(source: str, path: str) -> str:
+    """Unquoted JSON text carrying the surrounding expression's collation.
+
+    0098's helper, needed for the same reason: MariaDB gives JSON_UNQUOTE the
+    connection charset's default collation while a literal in a generated
+    column takes the table's, so comparing them is an illegal mix on a table
+    that is not `general_ci`.
+    """
+    return f"CAST(JSON_UNQUOTE(JSON_EXTRACT({source}, '{path}')) AS CHAR)"
+
+
 def _maria_array_expr(key: str, sources: list[str]) -> str:
     branches = [
         f"CASE WHEN JSON_LENGTH(JSON_EXTRACT({src}, '$.{key}')) > 0 "
@@ -232,7 +243,7 @@ def _maria_array_expr(key: str, sources: list[str]) -> str:
 
 
 def _maria_int_date_branch(src: str, mult: int) -> str:
-    val = f"JSON_UNQUOTE(JSON_EXTRACT({src}, '$.first_release_date'))"
+    val = _maria_text(src, "$.first_release_date")
     cast = f"CAST({val} AS SIGNED)"
     if mult != 1:
         cast = f"{cast} * {mult}"
@@ -244,7 +255,7 @@ def _maria_int_date_branch(src: str, mult: int) -> str:
 
 
 def _maria_gamelist_date_branch() -> str:
-    gl = "JSON_UNQUOTE(JSON_EXTRACT(gamelist_metadata, '$.first_release_date'))"
+    gl = _maria_text("gamelist_metadata", "$.first_release_date")
     # STR_TO_DATE is barred from a generated column, so the fixed-width
     # "YYYYMMDDThhmmss" string is reshaped into a datetime literal and
     # range-checked by hand; invalid dates fall through to NULL. See 0098.
@@ -293,7 +304,7 @@ def _maria_first_release_date(with_steam: bool) -> str:
 
 
 def _maria_rating(source: str, key: str, multiplier: int) -> str:
-    val = f"JSON_UNQUOTE(JSON_EXTRACT({source}, '$.{key}'))"
+    val = _maria_text(source, f"$.{key}")
     cast = f"CAST({val} AS DECIMAL(10,2))"
     if multiplier != 1:
         cast = f"{cast} * {multiplier}"
@@ -311,7 +322,7 @@ def _maria_rating_count() -> str:
     # to a silent 0.
     branches = []
     for src in _IGDB_SOURCES:
-        val = f"JSON_UNQUOTE(JSON_EXTRACT({src}, '$.total_rating_count'))"
+        val = _maria_text(src, "$.total_rating_count")
         branches.append(
             f"CASE WHEN JSON_CONTAINS_PATH({src}, 'one', '$.total_rating_count') "
             f"AND {val} REGEXP '^[0-9]+$' THEN CAST({val} AS SIGNED) ELSE NULL END"
