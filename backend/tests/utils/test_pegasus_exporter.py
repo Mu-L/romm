@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from config.config_manager import GAMELIST_MEDIA_DIRS
+from config.config_manager import PLATFORM_MEDIA_DIRS
 from handler.database import db_platform_handler, db_rom_handler
 from handler.filesystem import (
     fs_platform_handler,
@@ -496,7 +496,7 @@ class TestCopyAndEntry:
 
 class TestExportToFile:
     def test_media_keys_resolve_to_esde_dirs(self):
-        assert set(PEGASUS_MEDIA_KEYS.values()) <= set(GAMELIST_MEDIA_DIRS)
+        assert set(PEGASUS_MEDIA_KEYS.values()) <= set(PLATFORM_MEDIA_DIRS)
 
     async def test_media_shares_esde_dirs(
         self, admin_user: User, tmp_path, monkeypatch

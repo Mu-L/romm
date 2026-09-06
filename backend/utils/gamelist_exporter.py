@@ -12,7 +12,7 @@ from fastapi import Request
 from starlette.datastructures import URLPath
 
 from config import FRONTEND_RESOURCES_PATH, YOUTUBE_BASE_URL
-from config.config_manager import GAMELIST_MEDIA_DIRS
+from config.config_manager import PLATFORM_MEDIA_DIRS
 from config.config_manager import config_manager as cm
 from handler.database import db_platform_handler, db_rom_handler
 from handler.filesystem import fs_platform_handler, fs_resource_handler
@@ -130,7 +130,7 @@ class GamelistExporter:
 
         if self.local_export:
             for asset_key, source_path in assets.items():
-                subdir = GAMELIST_MEDIA_DIRS[asset_key]
+                subdir = PLATFORM_MEDIA_DIRS[asset_key]
                 dest_name = f"{rom.fs_name_no_ext}{source_path.suffix}"
                 rel_path = f"./{subdir}/{dest_name}"
 

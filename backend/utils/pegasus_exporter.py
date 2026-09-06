@@ -4,7 +4,7 @@ from typing import Final
 
 from fastapi import Request
 
-from config.config_manager import GAMELIST_MEDIA_DIRS
+from config.config_manager import PLATFORM_MEDIA_DIRS
 from handler.database import db_platform_handler, db_rom_handler
 from handler.filesystem import fs_platform_handler, fs_resource_handler
 from logger.logger import log
@@ -400,7 +400,7 @@ class PegasusExporter:
                     assets = self._collect_assets(rom)
 
                     for asset_key, source_path in assets.items():
-                        subdir = GAMELIST_MEDIA_DIRS[PEGASUS_MEDIA_KEYS[asset_key]]
+                        subdir = PLATFORM_MEDIA_DIRS[PEGASUS_MEDIA_KEYS[asset_key]]
                         dest_name = f"{rom.fs_name_no_ext}{source_path.suffix}"
                         dest_path = platform_dir / subdir / dest_name
 

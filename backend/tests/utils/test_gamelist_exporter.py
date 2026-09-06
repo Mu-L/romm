@@ -6,7 +6,7 @@ from xml.etree.ElementTree import fromstring
 import pytest
 
 from config import FRONTEND_RESOURCES_PATH
-from config.config_manager import GAMELIST_MEDIA_DIRS
+from config.config_manager import PLATFORM_MEDIA_DIRS
 from handler.database import db_platform_handler, db_rom_handler
 from handler.filesystem import (
     fs_platform_handler,
@@ -648,4 +648,4 @@ def test_export_gamelist_xml_mix_falls_back_to_miximage_v2(platform_with_roms):
 
 def test_gamelist_media_dirs_are_excluded_from_scan():
     """Media folders beside the ROMs are never scanned as multi-file ROMs."""
-    assert fs_rom_handler.exclude_multi_roms(list(GAMELIST_MEDIA_DIRS.values())) == []
+    assert fs_rom_handler.exclude_multi_roms(list(PLATFORM_MEDIA_DIRS.values())) == []
