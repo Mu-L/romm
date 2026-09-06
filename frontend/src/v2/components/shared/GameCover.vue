@@ -133,12 +133,6 @@ const coverLoaded = ref(false);
 const activeSrc = computed(() =>
   showFallback.value ? art.fallbackUrl.value : art.coverUrl.value,
 );
-// The src the <img> is actually carrying, for surfaces that need to point at
-// the same artwork (the details-page zoom). Follows the error swap to the
-// external fallback, and is null while the placeholder paints instead.
-const renderedSrc = computed(() =>
-  showingImage.value ? activeSrc.value : null,
-);
 // Rom id to key the measured ratio under — but ONLY when this is the rom's
 // own cover in the gallery's artwork style. With a `coverSrc` override (the
 // cover shows a screenshot / marquee / preview blob instead) the measured
@@ -248,7 +242,8 @@ defineExpose({
   playLoad,
   /** The cover box DOM node — for the forward view-transition morph. */
   el: () => rootEl.value,
-  renderedSrc,
+  /** Resolved cover URL (for the background-art highlight). */
+  resolvedCover: () => art.coverUrl.value ?? art.fallbackUrl.value,
 });
 </script>
 
