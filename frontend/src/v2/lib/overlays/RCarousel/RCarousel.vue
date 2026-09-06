@@ -219,15 +219,19 @@ function onBackdropClick(event: MouseEvent) {
       </button>
 
       <!-- Stage: holds the transitioning active item, vertically + horizontally
-           centred. The .self click dismisses on the padded backdrop area
-           around the image — outside-click on the outer wrapper would miss
-           those gaps because they're nested inside the stage. -->
+           centred. The .self clicks dismiss on the backdrop area around the
+           image; outside-click on the outer wrapper alone would miss those
+           gaps because they're nested inside the stage. The item box fills
+           the stage while the image only letterboxes inside it, so the item
+           needs its own handler or most of the visible backdrop stays dead. -->
       <!-- eslint-disable-next-line vuejs-accessibility/click-events-have-key-events,vuejs-accessibility/no-static-element-interactions -->
       <div class="r-carousel__stage" @click.self="onBackdropClick">
         <Transition :name="transitionName" mode="out-in">
+          <!-- eslint-disable-next-line vuejs-accessibility/click-events-have-key-events,vuejs-accessibility/no-static-element-interactions -->
           <div
             :key="safeIndex"
             class="r-carousel__item r-carousel__item--fullscreen"
+            @click.self="onBackdropClick"
           >
             <slot
               v-if="activeItem !== undefined"
