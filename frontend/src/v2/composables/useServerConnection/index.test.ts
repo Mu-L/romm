@@ -48,6 +48,19 @@ async function goOfflineThenOnline() {
   await nextTick();
 }
 
+/** A blip survived mid-game, leaving a refresh held back. */
+async function playThroughABlip() {
+  playingStore.playing = true;
+  await nextTick();
+  await goOfflineThenOnline();
+  expect(reload).not.toHaveBeenCalled();
+}
+
+/** The api layer's "no requests left in flight" announcement. */
+function quiesce() {
+  document.dispatchEvent(new CustomEvent("network-quiesced"));
+}
+
 beforeAll(() => {
   originalLocation = window.location;
   Object.defineProperty(window, "location", {
@@ -112,17 +125,47 @@ describe("useServerConnection recovery", () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
-  it("refreshes once the player is left", async () => {
+  it("refreshes once the player is left and the network goes quiet", async () => {
     await install();
-    playingStore.playing = true;
-    await nextTick();
-    await goOfflineThenOnline();
+    await playThroughABlip();
 
     playingStore.playing = false;
     await nextTick();
-    // The teardown grace period keeps the page alive for a beat.
+    // The player's teardown requests are still settling.
     expect(reload).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1_000);
+
+    quiesce();
+    expect(reload).toHaveBeenCalledOnce();
+    // The cap must not fire a second reload behind it.
+    vi.advanceTimersByTime(60_000);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes on the cap when the network never goes quiet", async () => {
+    await install();
+    await playThroughABlip();
+
+    playingStore.playing = false;
+    await nextTick();
+    vi.advanceTimersByTime(10_000);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("drops a held-back refresh when the backend goes offline again", async () => {
+    await install();
+    await playThroughABlip();
+
+    playingStore.playing = false;
+    await nextTick();
+    heartbeatStore.connected = false;
+    await nextTick();
+    quiesce();
+    vi.advanceTimersByTime(60_000);
+    expect(reload).not.toHaveBeenCalled();
+
+    // The next recovery refreshes instead, now that nothing is running.
+    heartbeatStore.connected = true;
+    await nextTick();
     expect(reload).toHaveBeenCalledOnce();
   });
 

@@ -30,9 +30,9 @@ const POLL_ONLINE_MS = 5 * 60_000;
 // Once offline, poll quickly so recovery is picked up promptly.
 const POLL_OFFLINE_MS = 5_000;
 const HEARTBEAT_TIMEOUT_MS = 5_000;
-// Leaving a player fires its teardown requests (play-session flush, presence
-// stop); give them a moment to reach the backend before the page goes away.
-const DEFERRED_REFRESH_DELAY_MS = 1_000;
+// Cap on the wait for `network-quiesced` before a held-back refresh gives up
+// on a quiet moment and reloads anyway.
+const QUIESCE_WAIT_MS = 10_000;
 
 let installed = false;
 
@@ -80,13 +80,30 @@ function install() {
       },
     );
 
-    // A refresh held back during play lands as soon as the player is left.
+    // A refresh held back during play lands once the player is left. Leaving
+    // fires teardown requests (stream save + release, play-session flush,
+    // presence stop) that a reload would abort, so wait for the network to go
+    // quiet — the api layer already announces that — rather than guessing at a
+    // delay. `network-quiesced` needs a settling request to fire at all, hence
+    // the cap for an app that has gone silent.
     watch(
       () => playing.playing,
       (isPlaying) => {
         if (isPlaying || !refreshPending) return;
         refreshPending = false;
-        setTimeout(() => window.location.reload(), DEFERRED_REFRESH_DELAY_MS);
+
+        let refreshed = false;
+        const refresh = () => {
+          if (refreshed) return;
+          refreshed = true;
+          document.removeEventListener("network-quiesced", refresh);
+          clearTimeout(capTimer);
+          // Back offline during the wait: leave the refresh to the next
+          // reconnect rather than rebooting against a dead backend.
+          if (heartbeat.connected) window.location.reload();
+        };
+        const capTimer = setTimeout(refresh, QUIESCE_WAIT_MS);
+        document.addEventListener("network-quiesced", refresh);
       },
     );
   });
