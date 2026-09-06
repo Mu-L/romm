@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from itertools import batched
 from typing import Any, NamedTuple
 
 from sqlalchemy import delete, func, insert, select
@@ -61,12 +62,9 @@ class UserAffinityRow(NamedTuple):
 
     rom_id: int
     rating: int | None
-    difficulty: int | None
-    completion: int | None
     status: str | None
     last_played: Any | None
     now_playing: bool
-    backlogged: bool
     hidden: bool
     playtime_ms: int
 
@@ -105,11 +103,10 @@ class DBRecommendationsHandler(DBBaseHandler):
                 RomFacets.keywords,
                 RomFacets.themes,
                 RomFacets.player_perspectives,
-                RomMetadata.first_release_date,
-                RomMetadata.average_rating,
+                Rom.generated_first_release_date,
+                Rom.generated_average_rating,
             )
             .join(Rom, Rom.id == RomFacets.rom_id)
-            .outerjoin(RomMetadata, RomMetadata.rom_id == RomFacets.rom_id)
             .where(Rom.missing_from_fs.is_(False))
         )
 
@@ -255,19 +252,11 @@ class DBRecommendationsHandler(DBBaseHandler):
         session.execute(delete(RomSimilarity).where(RomSimilarity.rom_id.in_(rom_ids)))
 
         written = 0
-        for start in range(0, len(edges), EDGE_INSERT_CHUNK_SIZE):
-            chunk = edges[start : start + EDGE_INSERT_CHUNK_SIZE]
-            if chunk:
-                session.execute(insert(RomSimilarity), chunk)
-                written += len(chunk)
+        for chunk in batched(edges, EDGE_INSERT_CHUNK_SIZE, strict=False):
+            session.execute(insert(RomSimilarity), list(chunk))
+            written += len(chunk)
 
         return written
-
-    @begin_session
-    def delete_all_similarity_edges(
-        self, session: Session = None  # type: ignore
-    ) -> None:
-        session.execute(delete(RomSimilarity))
 
     @begin_session
     def count_similarity_edges(self, session: Session = None) -> int:  # type: ignore
@@ -369,12 +358,9 @@ class DBRecommendationsHandler(DBBaseHandler):
             select(
                 RomUser.rom_id,
                 RomUser.rating,
-                RomUser.difficulty,
-                RomUser.completion,
                 RomUser.status,
                 RomUser.last_played,
                 RomUser.now_playing,
-                RomUser.backlogged,
                 RomUser.hidden,
                 func.coalesce(playtime_subq.c.playtime_ms, 0),
             )
@@ -386,14 +372,11 @@ class DBRecommendationsHandler(DBBaseHandler):
             UserAffinityRow(
                 rom_id=row[0],
                 rating=row[1],
-                difficulty=row[2],
-                completion=row[3],
-                status=row[4].value if hasattr(row[4], "value") else row[4],
-                last_played=row[5],
-                now_playing=bool(row[6]),
-                backlogged=bool(row[7]),
-                hidden=bool(row[8]),
-                playtime_ms=int(row[9] or 0),
+                status=row[2].value if hasattr(row[2], "value") else row[2],
+                last_played=row[3],
+                now_playing=bool(row[4]),
+                hidden=bool(row[5]),
+                playtime_ms=int(row[6] or 0),
             )
             for row in session.execute(stmt).all()
         ]

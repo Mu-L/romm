@@ -92,10 +92,9 @@ def _view_sql(is_pg: bool, columns: list[tuple[str, str]]) -> str:
 def upgrade() -> None:
     is_pg = is_postgresql(op.get_bind())
     expr = _postgres_expr() if is_pg else _maria_expr()
-    column_type = "BIGINT" if is_pg else "BIGINT"
 
     op.execute(
-        f"ALTER TABLE roms ADD COLUMN {_COLUMN} {column_type} "  # nosec B608
+        f"ALTER TABLE roms ADD COLUMN {_COLUMN} BIGINT "  # nosec B608
         f"GENERATED ALWAYS AS ({expr}) STORED"
     )
     op.execute(_view_sql(is_pg, _VIEW_COLUMNS + [(_COLUMN, "rating_count")]))

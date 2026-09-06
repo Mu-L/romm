@@ -157,7 +157,6 @@ router.include_router(patch_router)
 STATUS_MEMBERSHIP_FIELDS = frozenset({"status", "now_playing", "backlogged", "hidden"})
 
 
-# RomUser fields that feed the recommendation ranking.
 def safe_int_or_none(value: Any) -> int | None:
     if value is None or value == "":
         return None

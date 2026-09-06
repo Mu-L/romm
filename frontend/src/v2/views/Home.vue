@@ -27,14 +27,10 @@ import LiveSessionCard from "@/v2/components/Home/LiveSessionCard.vue";
 import WidgetBar from "@/v2/components/Home/Widgets/WidgetBar.vue";
 import PlatformTile from "@/v2/components/Platforms/PlatformTile.vue";
 import CardRow from "@/v2/components/shared/CardRow.vue";
+import RecommendationReason from "@/v2/components/shared/RecommendationReason.vue";
 import { useGridNav } from "@/v2/composables/useGridNav";
 import { useWebpSupport } from "@/v2/composables/useWebpSupport";
 import { collectionCoverList } from "@/v2/utils/collectionCovers";
-import {
-  primaryReason,
-  reasonIcon,
-  reasonLabel,
-} from "@/v2/utils/similarityReasons";
 
 const { t } = useI18n();
 
@@ -441,21 +437,16 @@ function collectionCovers(c: {
               :rom="item.rom"
               :webp="supportsWebp"
             />
-            <span v-if="item.seed_rom_name" class="r-v2-home__rec-reason">
-              {{
-                t("recommendations.because-you-played", [item.seed_rom_name])
-              }}
-            </span>
-            <span
-              v-else-if="primaryReason(item.reasons)"
-              class="r-v2-home__rec-reason"
-            >
-              <RIcon
-                :icon="reasonIcon(primaryReason(item.reasons)!)"
-                size="11"
-              />
-              {{ reasonLabel(primaryReason(item.reasons)!, t) }}
-            </span>
+            <RecommendationReason
+              :reasons="item.reasons"
+              :label="
+                item.seed_rom_name
+                  ? t('recommendations.because-you-played', [
+                      item.seed_rom_name,
+                    ])
+                  : null
+              "
+            />
           </div>
         </template>
       </CardRow>
@@ -644,19 +635,6 @@ function collectionCovers(c: {
   flex-direction: column;
   gap: 4px;
   flex-shrink: 0;
-}
-
-.r-v2-home__rec-reason {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 158px;
-  overflow: hidden;
-  font-size: 10.5px;
-  font-weight: var(--r-font-weight-medium);
-  color: var(--r-color-fg-faint);
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 /* ── Empty library state ─────────────────────────────────────────

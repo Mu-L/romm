@@ -6,15 +6,9 @@
 // is already a real ROM resolved server-side by the recommendations index.
 // That means normal interactive GameCards (no synthetic rom, no per-card
 // request) and a reason chip explaining why each game was suggested.
-import { RIcon } from "@v2/lib";
-import { useI18n } from "vue-i18n";
 import type { SimilarRomSchema } from "@/__generated__";
 import GameCard from "@/v2/components/GameCard/GameCard.vue";
-import {
-  primaryReason,
-  reasonIcon,
-  reasonLabel,
-} from "@/v2/utils/similarityReasons";
+import RecommendationReason from "@/v2/components/shared/RecommendationReason.vue";
 
 defineOptions({ inheritAttrs: false });
 
@@ -22,8 +16,6 @@ defineProps<{
   items: SimilarRomSchema[];
   webp?: boolean;
 }>();
-
-const { t } = useI18n();
 </script>
 
 <template>
@@ -34,14 +26,7 @@ const { t } = useI18n();
       class="similar-games__item"
     >
       <GameCard :rom="item.rom" :webp="webp" />
-      <span
-        v-if="primaryReason(item.reasons)"
-        class="similar-games__reason"
-        :title="t('recommendations.why')"
-      >
-        <RIcon :icon="reasonIcon(primaryReason(item.reasons)!)" size="11" />
-        {{ reasonLabel(primaryReason(item.reasons)!, t) }}
-      </span>
+      <RecommendationReason :reasons="item.reasons" />
     </div>
   </div>
 </template>
@@ -63,18 +48,5 @@ const { t } = useI18n();
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.similar-games__reason {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 158px;
-  overflow: hidden;
-  font-size: 10.5px;
-  font-weight: var(--r-font-weight-medium);
-  color: var(--r-color-fg-faint);
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 </style>

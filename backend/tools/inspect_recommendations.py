@@ -54,14 +54,12 @@ from models.recommendation import RomSimilarity  # noqa: E402
 from models.rom import Rom, RomMetadata  # noqa: E402
 
 NAME_WIDTH = 42
-FACET_ORDER = ("collection", "franchise", "company", "genre", "game_mode", "decade")
 
 
 class RomInfo:
     """The display fields for one ROM, resolved in a single query."""
 
-    def __init__(self, rom_id: int, name: str, platform: str) -> None:
-        self.rom_id = rom_id
+    def __init__(self, name: str, platform: str) -> None:
         self.name = name
         self.platform = platform
 
@@ -85,7 +83,7 @@ def load_rom_info(rom_ids: list[int]) -> dict[int, RomInfo]:
     )
     with sync_session.begin() as session:
         return {
-            row[0]: RomInfo(row[0], row[1] or row[2], row[3])
+            row[0]: RomInfo(row[1] or row[2], row[3])
             for row in session.execute(stmt).all()
         }
 

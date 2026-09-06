@@ -8,7 +8,7 @@
 import { RTabNav, type RTabNavItem } from "@v2/lib";
 import { formatReleaseDate } from "@v2/utils/time";
 import { storeToRefs } from "pinia";
-import { computed, ref, watch, watchEffect } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import type { IGDBRelatedGame, SimilarRomSchema } from "@/__generated__";
@@ -245,35 +245,33 @@ const igdb = computed(() => currentRom.value?.igdb_metadata ?? null);
 // `igdb_metadata.similar_games`: the IGDB list is mostly titles the server
 // doesn't hold, and it's missing entirely for anything IGDB never matched.
 // Every entry here is a real ROM in this library.
-//
-// Capped so the section stays ~2 rows of cards at typical widths and
-// doesn't push HLTB / Achievements below the fold.
-const SIMILAR_GAMES_MAX = 6;
 const similarRoms = ref<SimilarRomSchema[]>([]);
 
-watchEffect((onCleanup) => {
-  const romId = currentRom.value?.id;
-  similarRoms.value = [];
-  if (!romId) return;
+// Keyed on the id alone: `currentRom` is reassigned wholesale by every
+// optimistic mutation (favourite, rating, status), and refetching on those
+// would blank and repopulate the grid mid-interaction.
+watch(
+  () => currentRom.value?.id,
+  (romId, _previous, onCleanup) => {
+    similarRoms.value = [];
+    if (!romId) return;
 
-  const controller = new AbortController();
-  onCleanup(() => controller.abort());
+    const controller = new AbortController();
+    onCleanup(() => controller.abort());
 
-  romApi
-    .getSimilarRoms({
-      romId,
-      limit: SIMILAR_GAMES_MAX,
-      signal: controller.signal,
-    })
-    .then(({ data }) => {
-      similarRoms.value = data;
-    })
-    .catch(() => {
-      // The section simply stays hidden: an empty recommendations index
-      // (never built, or a library too small to relate anything) is a
-      // normal state, not an error worth interrupting the page for.
-    });
-});
+    romApi
+      .getSimilarRoms({ romId, signal: controller.signal })
+      .then(({ data }) => {
+        similarRoms.value = data;
+      })
+      .catch(() => {
+        // The section simply stays hidden: an empty recommendations index
+        // (never built, or a library too small to relate anything) is a
+        // normal state, not an error worth interrupting the page for.
+      });
+  },
+  { immediate: true },
+);
 const remakes = computed<IGDBRelatedGame[]>(() => igdb.value?.remakes ?? []);
 const remasters = computed<IGDBRelatedGame[]>(
   () => igdb.value?.remasters ?? [],

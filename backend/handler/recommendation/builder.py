@@ -7,9 +7,10 @@ scores library-relative changes as the shelf grows.
 
 from __future__ import annotations
 
+import heapq
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Any, Final
 
@@ -62,9 +63,6 @@ class BuildStats:
     edges_written: int = 0
     roms_without_metadata: int = 0
     total: int = 0
-
-    def to_dict(self) -> dict[str, int]:
-        return asdict(self)
 
 
 @dataclass
@@ -331,26 +329,27 @@ class SimilarityBuilder:
         candidates |= signals.partners_of(rom_id)
         candidates.discard(rom_id)
 
-        if len(candidates) > MAX_CANDIDATES_PER_ROM:
-            candidates = set(
-                sorted(
-                    candidates,
-                    key=lambda cid: content_similarity(
-                        source_vector, vectors.get(cid, {})
-                    ),
-                    reverse=True,
-                )[:MAX_CANDIDATES_PER_ROM]
+        contents = {
+            candidate_id: content_similarity(
+                source_vector, vectors.get(candidate_id, {})
+            )
+            for candidate_id in candidates
+        }
+        if len(contents) > MAX_CANDIDATES_PER_ROM:
+            contents = dict(
+                heapq.nlargest(
+                    MAX_CANDIDATES_PER_ROM,
+                    contents.items(),
+                    key=lambda item: (item[1], item[0]),
+                )
             )
 
-        scored: list[tuple[float, int, list[dict[str, str]]]] = []
-        for candidate_id in candidates:
+        scored: list[tuple[float, int]] = []
+        for candidate_id, content in contents.items():
             if self._is_duplicate(rom_id, candidate_id, identities):
                 continue
 
-            candidate_vector = vectors.get(candidate_id, {})
-            content = content_similarity(source_vector, candidate_vector)
             key = _pair_key(rom_id, candidate_id)
-
             score = blend(
                 content=content,
                 igdb_prior=signals.igdb.get(key, 0.0),
@@ -359,14 +358,8 @@ class SimilarityBuilder:
                 average_rating=features[candidate_id].average_rating,
             )
 
-            if score < MIN_EDGE_SCORE:
-                continue
-
-            reasons = shared_reasons(source_vector, candidate_vector)
-            if key in signals.igdb:
-                reasons.append({"facet": "igdb", "value": "similar"})
-
-            scored.append((score, candidate_id, reasons))
+            if score >= MIN_EDGE_SCORE:
+                scored.append((score, candidate_id))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
 
@@ -379,7 +372,7 @@ class SimilarityBuilder:
         series_counts: dict[str, int] = {}
         source_title = feature.title_key
 
-        for score, candidate_id, reasons in scored:
+        for score, candidate_id in scored:
             candidate_identity = identities.get(candidate_id, _NO_IDENTITY)
             if not candidate_identity.isdisjoint(taken_identities):
                 continue
@@ -402,6 +395,10 @@ class SimilarityBuilder:
                 continue
             for token in series:
                 series_counts[token] = series_counts.get(token, 0) + 1
+
+            reasons = shared_reasons(source_vector, vectors.get(candidate_id, {}))
+            if _pair_key(rom_id, candidate_id) in signals.igdb:
+                reasons.append({"facet": "igdb", "value": "similar"})
 
             edges.append(
                 {

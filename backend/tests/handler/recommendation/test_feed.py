@@ -20,12 +20,9 @@ def affinity_row(**overrides) -> UserAffinityRow:
     defaults = {
         "rom_id": 1,
         "rating": None,
-        "difficulty": None,
-        "completion": None,
         "status": None,
         "last_played": NOW,
         "now_playing": False,
-        "backlogged": False,
         "hidden": False,
         "playtime_ms": 0,
     }

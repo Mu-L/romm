@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Final
 
 # Relative pull of each facet before IDF weighting. A shared series or
@@ -107,20 +107,8 @@ SAME_DECADE_TOKEN: Final = "decade"
 # A ROM carrying none of these has nothing to be similar *about*: platform and
 # decade alone would make every unmatched file in a folder a perfect match for
 # every other, since both vectors normalise to the same thing.
-TASTE_FACETS: Final[frozenset[str]] = frozenset(
-    {
-        "genre",
-        "franchise",
-        "collection",
-        "company",
-        "game_mode",
-        "developer",
-        "publisher",
-        "keyword",
-        "theme",
-        "perspective",
-    }
-)
+CONTEXT_FACETS: Final[frozenset[str]] = frozenset({"platform", SAME_DECADE_TOKEN})
+TASTE_FACETS: Final[frozenset[str]] = frozenset(FACET_WEIGHTS) - CONTEXT_FACETS
 
 
 def has_taste_signal(tokens: Sequence[str]) -> bool:
@@ -152,15 +140,6 @@ class RomFeatures:
     # Normalised title, used to spot the same game released on another
     # platform, which IGDB indexes as a separate id.
     title_key: str | None = None
-
-
-@dataclass(slots=True)
-class ScoredNeighbour:
-    """One edge of the item-item graph, with its explanation."""
-
-    rom_id: int
-    score: float
-    reasons: list[dict[str, str]] = field(default_factory=list)
 
 
 def extract_tokens(
@@ -430,14 +409,15 @@ def candidate_ids(
     total_documents: int,
 ) -> set[int]:
     """Candidate neighbours for one ROM, drawn from its rarest facets."""
-    df_cap = max(MIN_CANDIDATE_DF, int(total_documents * MAX_CANDIDATE_DF_RATIO))
+    df_cap = min(
+        MAX_CANDIDATE_POSTINGS,
+        max(MIN_CANDIDATE_DF, int(total_documents * MAX_CANDIDATE_DF_RATIO)),
+    )
     candidates: set[int] = set()
 
     for token in feature.tokens:
         bucket = postings.get(token)
-        if not bucket:
-            continue
-        if len(bucket) > df_cap or len(bucket) > MAX_CANDIDATE_POSTINGS:
+        if not bucket or len(bucket) > df_cap:
             continue
         candidates.update(bucket)
 

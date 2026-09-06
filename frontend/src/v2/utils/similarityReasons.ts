@@ -55,10 +55,3 @@ export function reasonLabel(
 
   return reason.value;
 }
-
-/** The single most explanatory reason, used where only one chip fits. */
-export function primaryReason(
-  reasons: SimilarityReasonSchema[],
-): SimilarityReasonSchema | null {
-  return reasons[0] ?? null;
-}

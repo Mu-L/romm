@@ -267,7 +267,7 @@ def extract_metadata_from_igdb_rom(
             "total_rating_count": rom.get("total_rating_count", 0),
             "aggregated_rating": str(round(rom.get("aggregated_rating", 0.0), 2)),
             "first_release_date": rom.get("first_release_date", None),
-            "genres": [g.get("name", "") for g in genres if g.get("name")],
+            "genres": _expanded_names(genres),
             # Community tags ("metroidvania", "roguelike") describing how a game
             # plays, which the coarse genre list does not capture.
             "keywords": _expanded_names(keywords),
@@ -278,14 +278,12 @@ def extract_metadata_from_igdb_rom(
             "franchises": pydash.uniq(
                 pydash.compact(
                     [franchise.get("name") if franchise else None]
-                    + [f.get("name", "") for f in franchises if f.get("name")]
+                    + _expanded_names(franchises)
                 )
             ),
-            "alternative_names": [
-                n.get("name", "") for n in alternative_names if n.get("name")
-            ],
-            "collections": [c.get("name", "") for c in collections if c.get("name")],
-            "game_modes": [g.get("name", "") for g in game_modes if g.get("name")],
+            "alternative_names": _expanded_names(alternative_names),
+            "collections": _expanded_names(collections),
+            "game_modes": _expanded_names(game_modes),
             "companies": [
                 c["company"]["name"] for c in involved_companies if c.get("company")
             ],

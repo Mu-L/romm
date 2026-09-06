@@ -20,6 +20,7 @@ from handler.recommendation.diversity import cap_by_series
 from handler.redis_handler import sync_cache
 from logger.logger import log
 from models.rom import Rom, RomUserStatus
+from utils.datetime import to_utc
 
 # The user rating scale is 1-10; 5.5 is the indifference point, so anything
 # below it pushes similar games *away* rather than merely not pulling them in.
@@ -62,6 +63,8 @@ OVERFETCH_FACTOR: Final = 5
 
 FEED_CACHE_TTL_SECONDS: Final = 900
 FEED_CACHE_PREFIX: Final = "recommendations:feed"
+# Bumped when the similarity graph is rebuilt, which invalidates every user.
+_GRAPH_VERSION_KEY: Final = f"{FEED_CACHE_PREFIX}:version"
 
 
 @dataclass
@@ -132,10 +135,7 @@ def _recency_factor(
         return MIN_RECENCY_FACTOR
 
     reference = now or datetime.now(timezone.utc)
-    if last_played.tzinfo is None:
-        last_played = last_played.replace(tzinfo=timezone.utc)
-
-    days = max(0.0, (reference - last_played).total_seconds() / 86_400)
+    days = max(0.0, (reference - to_utc(last_played)).total_seconds() / 86_400)
     decayed = math.pow(0.5, days / RECENCY_HALFLIFE_DAYS)
     return max(MIN_RECENCY_FACTOR, decayed)
 
@@ -344,15 +344,30 @@ def set_cached_feed(user_id: int, limit: int, feed: Sequence[RecommendedRom]) ->
 
 
 def invalidate_cached_feed(user_id: int) -> None:
-    for key in sync_cache.scan_iter(f"{FEED_CACHE_PREFIX}:{user_id}:*"):
-        sync_cache.delete(key)
+    sync_cache.incr(_user_version_key(user_id))
 
 
 def invalidate_all_cached_feeds() -> None:
     """Drop every user's ranking, for when the graph underneath it changes."""
-    for key in sync_cache.scan_iter(f"{FEED_CACHE_PREFIX}:*"):
-        sync_cache.delete(key)
+    sync_cache.incr(_GRAPH_VERSION_KEY)
+
+
+def _version(key: str) -> str:
+    raw = sync_cache.get(key)
+    if isinstance(raw, bytes):
+        return raw.decode()
+    return str(raw) if raw is not None else "0"
+
+
+def _user_version_key(user_id: int) -> str:
+    return f"{FEED_CACHE_PREFIX}:version:{user_id}"
 
 
 def _cache_key(user_id: int, limit: int) -> str:
-    return f"{FEED_CACHE_PREFIX}:{user_id}:{limit}"
+    # Both versions ride in the key so invalidation is a single INCR rather
+    # than a SCAN over a keyspace shared with the job queues and sessions.
+    # Superseded entries are never read again and fall out on their own TTL.
+    return (
+        f"{FEED_CACHE_PREFIX}:g{_version(_GRAPH_VERSION_KEY)}"
+        f":{user_id}:u{_version(_user_version_key(user_id))}:{limit}"
+    )
