@@ -67,14 +67,12 @@ WORKDIR /app
 # Install uv for the non-root user
 COPY --from=ghcr.io/astral-sh/uv:0.11.2 /uv /uvx /usr/local/bin/
 
-# Install Python
-RUN uv python install 3.13
-
 # Copy project files (including pyproject.toml and uv.lock)
 COPY pyproject.toml uv.lock* .python-version /app/
 
-# Install Python dependencies
-RUN uv sync --all-extras
+# Install Python (pinned by .python-version) and the project dependencies
+RUN uv python install \
+    && uv sync --all-extras
 
 ENV PATH="/app/.venv/bin:${PATH}"
 
@@ -82,7 +80,6 @@ ENV PATH="/app/.venv/bin:${PATH}"
 # Placed after `uv sync` because the extension is compiled with the venv's
 # Python so the ABI matches. Keep the pin in sync with docker/Dockerfile.
 ARG SIGIL_VERSION=9665f03c04d0f547ed38dd5e5e31916c1da5f2e9
-ARG PYTHON_VERSION=3.13
 # One layer, so the clone and the cmake tree never reach the image.
 # trunk-ignore(hadolint/DL3003)
 RUN git clone --filter=blob:none https://github.com/rommforge/argosy-sigil.git /tmp/argosy-sigil \
@@ -94,8 +91,9 @@ RUN git clone --filter=blob:none https://github.com/rommforge/argosy-sigil.git /
     && uv pip install --python /app/.venv/bin/python cffi setuptools \
     && cd ./bindings/python \
     && /app/.venv/bin/python build_sigil.py \
-    && mkdir -p "/app/.venv/lib/python${PYTHON_VERSION}/site-packages/sigil" \
-    && cp ./sigil/*.py ./sigil/_sigil.*.so "/app/.venv/lib/python${PYTHON_VERSION}/site-packages/sigil/" \
+    && SITE_PACKAGES="$(/app/.venv/bin/python -c 'import site; print(site.getsitepackages()[0])')" \
+    && mkdir -p "${SITE_PACKAGES}/sigil" \
+    && cp ./sigil/*.py ./sigil/_sigil.*.so "${SITE_PACKAGES}/sigil/" \
     && rm -rf /tmp/argosy-sigil
 WORKDIR /app
 

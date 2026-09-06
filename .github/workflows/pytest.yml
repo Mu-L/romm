@@ -4,11 +4,19 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - ".github/workflows/pytest.yml"
+      - pyproject.toml
+      - uv.lock
+      - .python-version
   push:
     branches:
       - "master"
     paths:
       - "backend/**"
+      - ".github/workflows/pytest.yml"
+      - pyproject.toml
+      - uv.lock
+      - .python-version
 
 permissions: read-all
 
@@ -62,7 +70,7 @@ jobs:
 
       - name: Install python
         run: |
-          uv python install 3.13
+          uv python install
 
       - name: Install dependencies
         run: |
