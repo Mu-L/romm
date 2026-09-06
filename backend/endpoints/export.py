@@ -18,7 +18,7 @@ router = APIRouter(
 )
 
 
-@protected_route(router.post, "/gamelist-xml", [Scope.ROMS_READ])
+@protected_route(router.post, "/gamelist-xml", [Scope.PLATFORMS_WRITE])
 async def export_gamelist_xml(
     request: Request,
     platform_ids: Annotated[
@@ -71,7 +71,7 @@ async def export_gamelist_xml(
         ) from e
 
 
-@protected_route(router.post, "/pegasus", [Scope.ROMS_READ])
+@protected_route(router.post, "/pegasus", [Scope.PLATFORMS_WRITE])
 async def export_pegasus(
     request: Request,
     platform_ids: Annotated[
